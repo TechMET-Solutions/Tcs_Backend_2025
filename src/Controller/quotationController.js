@@ -981,7 +981,7 @@ exports.printDeliveryChallan = async (req, res) => {
 <div class="page">
     <table class="header-table">
         <tr>
-            <td width="20%"><img src="http://localhost:5000/uploads/${it.productImage}" /></td>
+            <td width="20%"><img src="http://localhost:5000/uploads" /></td>
             <td class="business-info">
                 <h1 class="business-name">The Ceramic Studio</h1>
                 <div style="font-size: 11px; font-weight: bold;">
@@ -1190,7 +1190,7 @@ exports.printDeliveryChallan2 = async (req, res) => {
 <div class="page">
     <table class="header-table">
         <tr>
-            <td width="20%"><img src="http://localhost:5000/uploads/${productImage}" /></td>
+            <td width="20%"><img src="http://localhost:5000/uploads" /></td>
             <td class="business-info">
                 <h1 class="business-name">The Ceramic Studio</h1>
                 <div style="font-size: 11px; font-weight: bold;">
