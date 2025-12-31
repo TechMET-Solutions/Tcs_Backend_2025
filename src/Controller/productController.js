@@ -147,3 +147,126 @@ exports.getProducts = async (req, res) => {
         });
     }
 };
+exports.updateProduct = async (req, res) => {
+    const conn = await db.getConnection();
+    await conn.beginTransaction();
+
+    try {
+        const { id } = req.params;
+
+        const {
+            name,
+            size,
+            brand,
+            category,
+            quality,
+            rate,
+            status,
+            link,
+            godown,
+            description,
+            batches
+        } = req.body;
+
+        const image = req.file ? req.file.filename : null;
+
+        const parsedGodown = JSON.parse(godown);
+        const parsedBatches = JSON.parse(batches);
+        const godownValue = parsedGodown.join(",");
+
+        // 1️⃣ UPDATE PRODUCT
+        let updateProductSQL = `
+      UPDATE products SET
+        name = ?,
+        size = ?,
+        brand = ?,
+        category = ?,
+        quality = ?,
+        rate = ?,
+        status = ?,
+        link = ?,
+        godown = ?,
+        description = ?
+    `;
+
+        const params = [
+            name,
+            size,
+            brand,
+            category,
+            quality,
+            rate,
+            status,
+            link,
+            godownValue,
+            description
+        ];
+
+        if (image) {
+            updateProductSQL += `, image = ?`;
+            params.push(image);
+        }
+
+        updateProductSQL += ` WHERE id = ?`;
+        params.push(id);
+
+        await conn.query(updateProductSQL, params);
+
+        // 2️⃣ GET EXISTING BATCHES
+        const [existingBatches] = await conn.query(
+            `SELECT batch_no FROM product_batches WHERE product_id = ?`,
+            [id]
+        );
+
+        const existingBatchNos = existingBatches.map(b => b.batch_no);
+        const incomingBatchNos = parsedBatches.map(b => b.batchNo);
+
+        // 3️⃣ DELETE REMOVED BATCHES
+        const batchesToDelete = existingBatchNos.filter(
+            b => !incomingBatchNos.includes(b)
+        );
+
+        if (batchesToDelete.length > 0) {
+            await conn.query(
+                `DELETE FROM product_batches 
+         WHERE product_id = ? AND batch_no IN (?)`,
+                [id, batchesToDelete]
+            );
+        }
+
+        // 4️⃣ UPSERT BATCHES
+        for (const batch of parsedBatches) {
+            await conn.query(
+                `INSERT INTO product_batches (product_id, batch_no, qty, location)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           qty = VALUES(qty),
+           location = VALUES(location)`,
+                [
+                    id,
+                    batch.batchNo,
+                    Number(batch.qty),
+                    batch.location
+                ]
+            );
+        }
+
+        await conn.commit();
+
+        res.json({
+            success: true,
+            message: "Product updated successfully"
+        });
+
+    } catch (error) {
+        await conn.rollback();
+        console.error("UPDATE PRODUCT ERROR:", error);
+        res.status(500).json({
+            success: false,
+            message: "Update failed",
+            error: error.message
+        });
+    } finally {
+        conn.release();
+    }
+};
