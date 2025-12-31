@@ -1,4 +1,4 @@
-const db = require("../../Config/database");
+ const db = require("../../Config/database");
 const jwt = require("jsonwebtoken");
 const fs = require("fs");
 
@@ -118,5 +118,115 @@ exports.getEmployees = async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+exports.employeeLogin = async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: "Email and password required",
+            });
+        }
+
+        // =====================
+        // 🔑 ADMIN LOGIN (STATIC)
+        // =====================
+        if (email === "admin@gmail.com" && password === "123") {
+            const token = jwt.sign(
+                {
+                    id: 0,
+                    role: "admin",
+                    email: "admin@gmail.com",
+                },
+                process.env.JWT_SECRET,
+                { expiresIn: process.env.JWT_EXPIRES_IN }
+            );
+
+            return res.json({
+                success: true,
+                role: "admin",
+                token,
+                user: {
+                    name: "Admin",
+                    email: "admin@gmail.com",
+                },
+            });
+        }
+
+        // =====================
+        // 👤 EMPLOYEE LOGIN
+        // =====================
+        const [rows] = await db.query(
+            "SELECT * FROM employees WHERE email = ?",
+            [email]
+        );
+
+        if (!rows.length) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid email or password",
+            });
+        }
+
+        const employee = rows[0];
+
+        // ⚠️ Plain password check (bcrypt later)
+        if (employee.password !== password) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid email or password",
+            });
+        }
+
+        // =====================
+        // FETCH EMPLOYEE ROLES
+        // =====================
+        const [roleRows] = await db.query(
+            "SELECT permissions FROM employee_roles WHERE employeeId = ?",
+            [employee.id]
+        );
+
+        const permissions = roleRows.length
+            ? JSON.parse(roleRows[0].permissions)
+            : {};
+
+        // =====================
+        // JWT TOKEN
+        // =====================
+        const token = jwt.sign(
+            {
+                id: employee.id,
+                role: "employee",
+                email: employee.email,
+                permissions,
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: process.env.JWT_EXPIRES_IN }
+        );
+
+        res.json({
+            success: true,
+            role: "employee",
+            token,
+            user: {
+                id: employee.id,
+                name: employee.name,
+                email: employee.email,
+                phone: employee.phone,
+                commission: employee.commission,
+                salary: employee.salary,
+                permissions,
+            },
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message,
+        });
     }
 };

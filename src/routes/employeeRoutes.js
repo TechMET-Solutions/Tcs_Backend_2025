@@ -32,5 +32,5 @@ router.put('/update/:id', cpUpload, empCtrl.updateEmployee);
 router.delete('/delete/:id', empCtrl.deleteEmployee);
 router.patch('/status/:id', empCtrl.toggleStatus); // ✅ Use PATCH for status
 router.get('/list', empCtrl.getEmployees);
-
+router.post("/login", empCtrl.employeeLogin);
 module.exports = router;
