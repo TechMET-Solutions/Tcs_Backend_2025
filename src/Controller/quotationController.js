@@ -64,21 +64,17 @@ exports.saveQuotation = async (req, res) => {
     await conn.beginTransaction();
 
     try {
-        // 🔥 CREATE TABLES + MISSING COLUMNS
-        await ensureTablesExist(conn);
-
-        // 1️⃣ INSERT QUOTATION MASTER
+        // 1️⃣ INSERT QUOTATION MASTER (Fixed placeholders: 9 columns, 9 ?)
         const [quotation] = await conn.query(
             `INSERT INTO quotations 
                 (clientName, contactNo, email, address, attendedBy, architect, headerSection, bottomSection, grandTotal)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 clientDetails.name,
                 clientDetails.contactNo,
-                clientDetails.email,
+                clientDetails.email || null,
                 clientDetails.address,
-                clientDetails.attendedBy,
+                clientDetails.attendedBy || 'System', // Fallback if missing
                 clientDetails.architect,
                 headerSection,
                 bottomSection,
@@ -90,11 +86,13 @@ exports.saveQuotation = async (req, res) => {
 
         // 2️⃣ INSERT ITEMS + UPDATE STOCK
         for (let r of rows) {
+            // Ensure area exists, default to 0 if not provided in payload
+            const itemArea = r.area || 0;
+
             await conn.query(
                 `INSERT INTO quotation_items
                   (quotationId, productId, size, quality, rate, cov, box, weight, discount, total, area)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                `,
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     quotationId,
                     r.productId,
@@ -103,14 +101,14 @@ exports.saveQuotation = async (req, res) => {
                     r.rate,
                     r.cov,
                     r.box,
-                    r.weight,
-                    r.discount,
+                    r.weight || 0,
+                    r.discount || 0,
                     r.total,
-                    r.area,
+                    itemArea
                 ]
             );
 
-            // 🔥 SAFE STOCK UPDATE (zero पेक्षा खाली जाणार नाही)
+            // 🔥 Update Stock - Subtracting 'box' count from 'availQty'
             await conn.query(
                 `UPDATE products 
                  SET availQty = GREATEST(availQty - ?, 0)
@@ -120,18 +118,12 @@ exports.saveQuotation = async (req, res) => {
         }
 
         await conn.commit();
-
-        res.json({
-            success: true,
-            message: "Quotation saved successfully!",
-        });
+        res.json({ success: true, message: "Quotation saved successfully!", id: quotationId });
 
     } catch (err) {
         await conn.rollback();
-        res.status(500).json({
-            success: false,
-            error: err.message,
-        });
+        console.error("Error saving quotation:", err);
+        res.status(500).json({ success: false, error: err.message });
     } finally {
         conn.release();
     }
