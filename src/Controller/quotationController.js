@@ -11,6 +11,7 @@ const ensureTablesExist = async (conn) => {
             id INT AUTO_INCREMENT PRIMARY KEY,
             clientName VARCHAR(255),
             contactNo VARCHAR(50),
+            gstNo VARCHAR(50),
             email VARCHAR(255),
             address TEXT,
             attendedBy VARCHAR(255),
@@ -67,8 +68,8 @@ exports.saveQuotation = async (req, res) => {
         // 1️⃣ INSERT QUOTATION MASTER (Fixed placeholders: 9 columns, 9 ?)
         const [quotation] = await conn.query(
             `INSERT INTO quotations 
-                (clientName, contactNo, email, address, attendedBy, architect, headerSection, bottomSection, grandTotal)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                (clientName, contactNo, email, address, attendedBy, architect, headerSection, bottomSection, grandTotal, gstNo)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 clientDetails.name,
                 clientDetails.contactNo,
@@ -79,6 +80,7 @@ exports.saveQuotation = async (req, res) => {
                 headerSection,
                 bottomSection,
                 grandTotal,
+                clientDetails.gstNo,
             ]
         );
 
@@ -172,6 +174,7 @@ exports.updateQuotation = async (req, res) => {
                 email = ?,
                 address = ?,
                 attendedBy = ?,
+                gstNo = ?,
                 architect = ?,
                 headerSection = ?,
                 bottomSection = ?,
@@ -183,6 +186,7 @@ exports.updateQuotation = async (req, res) => {
                 clientDetails.email || null,
                 clientDetails.address,
                 clientDetails.attendedBy || 'System',
+                clientDetails.gstNo || '',
                 clientDetails.architect,
                 headerSection,
                 bottomSection,
