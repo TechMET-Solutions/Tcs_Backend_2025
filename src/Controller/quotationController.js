@@ -850,149 +850,71 @@ exports.printQuotation = async (req, res) => {
 
 
 exports.generateDeliveryChallan = async (req, res) => {
-    const {
-        quotationId,
-        client,
-        contact,
-        address,
-        driverDetails,
-        items
-    } = req.body;
-
+    const { quotationId, client, contact, address, driverDetails, items } = req.body;
     const conn = await db.getConnection();
     await conn.beginTransaction();
 
     try {
-        // 1️⃣ MASTER TABLE CREATE IF NOT EXISTS
-        await conn.query(`
-            CREATE TABLE IF NOT EXISTS delivery_challan (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                quotationId INT,
-                client VARCHAR(255),
-                contact VARCHAR(50),
-                address TEXT,
-                deliveryBoy VARCHAR(255),
-                driverContact VARCHAR(50),
-                tempo VARCHAR(50),
-                createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
-
-        // 2️⃣ ITEMS TABLE
-        await conn.query(`
-            CREATE TABLE IF NOT EXISTS delivery_challan_items (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                challanId INT,
-                productId INT,
-                productName VARCHAR(255),
-                dispatchBoxes INT,
-                dispatchQty INT,
-                remainingStock INT,
-                FOREIGN KEY (challanId) REFERENCES delivery_challan(id)
-            );
-        `);
-
-        // 3️⃣ Insert into challan master
+       
+       
+        // 2️⃣ Insert Master Record
         const [challan] = await conn.query(
-            `INSERT INTO delivery_challan 
-                (quotationId, client, contact, address, deliveryBoy, driverContact, tempo)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [
-                quotationId,
-                client,
-                contact,
-                address,
-                driverDetails.deliveryBoy,
-                driverDetails.contact,
-                driverDetails.tempo,
-            ]
+            `INSERT INTO delivery_challan (quotationId, client, contact, address, deliveryBoy, driverContact, tempo) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [quotationId, client, contact, address, driverDetails.deliveryBoy, driverDetails.contact, driverDetails.tempo]
         );
-
         const challanId = challan.insertId;
 
-        // ==============================
-        // 4️⃣ Process each product
-        // ==============================
+        // 3️⃣ Process Products
         for (let p of items) {
-
-            const dispatchQty = p.totalDispatchQty;
-
-            // ➤ Insert challan item
-            await conn.query(
-                `INSERT INTO delivery_challan_items 
-                    (challanId, productId, productName, dispatchBoxes, dispatchQty, remainingStock)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-                [
-                    challanId,
-                    p.productId,
-                    p.productName,
-                    p.dispatchBoxes,
-                    dispatchQty,
-                    p.remainingStock
-                ]
+            // ⭐ AUTOMATIC QTY CALCULATION
+            // We fetch the 'cov' from quotation_items to convert Boxes -> Qty
+            const [[itemData]] = await conn.query(
+                `SELECT cov FROM quotation_items WHERE quotationId = ? AND productId = ?`,
+                [quotationId, p.productId]
             );
 
-            // 🔥 FIFO Stock Deduction (from product_batches)
-            let remaining = dispatchQty;
+            const dispatchQty = p.dispatchBoxes * (itemData.cov || 0);
 
-            // Fetch batches
+            // Insert into Challan Items
+            await conn.query(
+                `INSERT INTO delivery_challan_items (challanId, productId, productName, dispatchBoxes, dispatchQty, remainingStock) VALUES (?, ?, ?, ?, ?, ?)`,
+                [challanId, p.productId, p.productName, p.dispatchBoxes, dispatchQty, p.remainingStock]
+            );
+
+            // 🔥 FIFO Stock Deduction from Batches (Qty based)
+            let remainingToDeduct = dispatchQty;
             const [batches] = await conn.query(
-                `SELECT id, qty FROM product_batches 
-                 WHERE product_id = ? ORDER BY batch_no ASC`,
+                `SELECT id, qty FROM product_batches WHERE product_id = ? AND qty > 0 ORDER BY batch_no ASC`,
                 [p.productId]
             );
 
             for (let b of batches) {
-                if (remaining <= 0) break;
-
-                if (b.qty > remaining) {
-                    // Reduce qty in this batch
-                    await conn.query(
-                        `UPDATE product_batches SET qty = qty - ? WHERE id = ?`,
-                        [remaining, b.id]
-                    );
-                    remaining = 0;
-                } else {
-                    remaining -= b.qty;
-                    await conn.query(
-                        `UPDATE product_batches SET qty = 0 WHERE id = ?`,
-                        [b.id]
-                    );
-                }
+                if (remainingToDeduct <= 0) break;
+                let deduct = Math.min(b.qty, remainingToDeduct);
+                await conn.query(`UPDATE product_batches SET qty = qty - ? WHERE id = ?`, [deduct, b.id]);
+                remainingToDeduct -= deduct;
             }
 
-            // Update product total available qty
+            // ⚡ Update Product Master Total (Box based deduction for availQty)
             await conn.query(
-                `UPDATE products 
-                 SET availQty = availQty - ? 
-                 WHERE id = ?`,
-                [dispatchQty, p.productId]
+                `UPDATE products SET availQty = availQty - ? WHERE id = ?`,
+                [p.dispatchBoxes, p.productId]
             );
 
-            // Update quotation_items → dispatched qty store करा
+            // ⚡ Update Quotation Progress (Qty based)
             await conn.query(
-                `UPDATE quotation_items 
-                 SET weight = weight + ? 
-                 WHERE quotationId = ? AND productId = ?`,
+                `UPDATE quotation_items SET weight = weight + ? WHERE quotationId = ? AND productId = ?`,
                 [dispatchQty, quotationId, p.productId]
             );
-
         }
 
         await conn.commit();
-
-        res.json({
-            success: true,
-            challanId,
-            message: "Delivery Challan Generated Successfully!"
-        });
+        res.json({ success: true, challanId, message: "Delivery Challan Generated Successfully!" });
 
     } catch (err) {
         await conn.rollback();
-        res.status(500).json({
-            success: false,
-            error: err.message
-        });
+        console.error("DC Error:", err);
+        res.status(500).json({ success: false, error: err.message });
     } finally {
         conn.release();
     }
