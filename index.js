@@ -15,6 +15,7 @@ app.use("/api/product", require("./src/routes/productRoutes"))
 app.use("/api/purchase", require("./src/routes/purchaseRoutes"));
 app.use("/api/Quotation", require("./src/routes/quotationRoutes"));
 app.use("/api/employees", require("./src/routes/employeeRoutes.js"));
+app.use("/api/payment", require("./src/routes/paymentRoutes.js"));
 app.get("/", (req, res) => {
     res.send("✅ Node.js Server Running...");
 });
