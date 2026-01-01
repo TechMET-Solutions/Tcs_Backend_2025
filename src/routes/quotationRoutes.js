@@ -2,9 +2,11 @@
 
 const express = require("express");
 const router = express.Router();
-const { saveQuotation, getAllQuotationsFull, printQuotation, generateDeliveryChallan, getAllDeliveryChallan, printDeliveryChallan, printDeliveryChallan2 } = require("../Controller/quotationController");
+const { saveQuotation, getAllQuotationsFull, printQuotation, generateDeliveryChallan, getAllDeliveryChallan, printDeliveryChallan, printDeliveryChallan2, updateQuotation } = require("../Controller/quotationController");
 
 router.post("/saveQuotation", saveQuotation);
+router.put("/updateQuotation/:id", updateQuotation);
+
 router.get("/list", getAllQuotationsFull);
 router.get("/print/:id", printQuotation);
 router.post("/generate-dc", generateDeliveryChallan);

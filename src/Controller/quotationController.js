@@ -62,7 +62,7 @@ exports.saveQuotation = async (req, res) => {
 
     const conn = await db.getConnection();
     await conn.beginTransaction();
-
+    ensureTablesExist(conn)
     try {
         // 1️⃣ INSERT QUOTATION MASTER (Fixed placeholders: 9 columns, 9 ?)
         const [quotation] = await conn.query(
@@ -128,6 +128,119 @@ exports.saveQuotation = async (req, res) => {
         conn.release();
     }
 };
+
+exports.updateQuotation = async (req, res) => {
+    const quotationId = req.params.id;
+    const {
+        clientDetails,
+        headerSection,
+        bottomSection,
+        rows,
+        grandTotal,
+    } = req.body;
+
+    if (!quotationId) {
+        return res.status(400).json({ success: false, message: "quotationId is required" });
+    }
+
+    const conn = await db.getConnection();
+    await conn.beginTransaction();
+
+    try {
+        ensureTablesExist(conn);
+
+        // 1️⃣ Restore stock from existing quotation items
+        const [oldItems] = await conn.query(
+            `SELECT productId, box FROM quotation_items WHERE quotationId = ?`,
+            [quotationId]
+        );
+
+        for (let item of oldItems) {
+            await conn.query(
+                `UPDATE products 
+                 SET availQty = availQty + ? 
+                 WHERE id = ?`,
+                [item.box, item.productId]
+            );
+        }
+
+        // 2️⃣ Update quotation master
+        await conn.query(
+            `UPDATE quotations SET
+                clientName = ?,
+                contactNo = ?,
+                email = ?,
+                address = ?,
+                attendedBy = ?,
+                architect = ?,
+                headerSection = ?,
+                bottomSection = ?,
+                grandTotal = ?
+             WHERE id = ?`,
+            [
+                clientDetails.name,
+                clientDetails.contactNo,
+                clientDetails.email || null,
+                clientDetails.address,
+                clientDetails.attendedBy || 'System',
+                clientDetails.architect,
+                headerSection,
+                bottomSection,
+                grandTotal,
+                quotationId
+            ]
+        );
+
+        // 3️⃣ Delete old quotation items
+        await conn.query(
+            `DELETE FROM quotation_items WHERE quotationId = ?`,
+            [quotationId]
+        );
+
+        // 4️⃣ Insert updated items + deduct stock
+        for (let r of rows) {
+            const itemArea = r.area || 0;
+
+            await conn.query(
+                `INSERT INTO quotation_items
+                    (quotationId, productId, size, quality, rate, cov, box, weight, discount, total, area)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    quotationId,
+                    r.productId,
+                    r.size,
+                    r.quality,
+                    r.rate,
+                    r.cov,
+                    r.box,
+                    r.weight || 0,
+                    r.discount || 0,
+                    r.total,
+                    itemArea
+                ]
+            );
+
+            // Deduct stock
+            await conn.query(
+                `UPDATE products 
+                 SET availQty = GREATEST(availQty - ?, 0)
+                 WHERE id = ?`,
+                [r.box, r.productId]
+            );
+        }
+
+        await conn.commit();
+        res.json({ success: true, message: "Quotation updated successfully!" });
+
+    } catch (err) {
+        await conn.rollback();
+        console.error("Error updating quotation:", err);
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        conn.release();
+    }
+};
+
 // ======================= GET ALL QUOTATIONS =======================
 // ======================= GET ALL QUOTATIONS WITH ITEMS =======================
 // exports.getAllQuotationsFull = async (req, res) => {
