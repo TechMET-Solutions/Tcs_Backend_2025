@@ -21,6 +21,8 @@ const ensureTablesExist = async (conn) => {
             grandTotal DECIMAL(12,2),
             paid_amount DECIMAL(12,2) DEFAULT 0.00,  -- ⭐ Added
             due_amount DECIMAL(12,2) DEFAULT 0.00,   -- ⭐ Added
+            isSettled BOOLEAN DEFAULT FALSE,              -- ⭐ New Status Column
+            commissionAmount DECIMAL(12,2) DEFAULT 0.00,  -- ⭐ New Commission Column
             createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     `);
@@ -44,7 +46,27 @@ const ensureTablesExist = async (conn) => {
             FOREIGN KEY (productId) REFERENCES products(id)
         );
     `);
-
+    await conn.query(`
+        CREATE TABLE IF NOT EXISTS architect_ledger (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            architectId VARCHAR(255),
+            quotationId INT,
+            commissionAmount DECIMAL(12,2),
+            settledAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (quotationId) REFERENCES quotations(id)
+        );
+    `);
+    await conn.query(`
+        CREATE TABLE IF NOT EXISTS architect_settlements (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            architectId INT NOT NULL,
+            quotationId INT NOT NULL,
+            totalProjectAmount DECIMAL(12,2),
+            settledAmount DECIMAL(12,2),
+            settlementDate TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (quotationId) REFERENCES quotations(id)
+        );
+    `);
     // ⭐ ADD COLUMN availQty IF NOT EXISTS
     await conn.query(`
         ALTER TABLE products 
@@ -458,8 +480,94 @@ exports.getAllQuotationsFull = async (req, res) => {
     }
 };
 
+exports.getArchitectQuotations = async (req, res) => {
+    try {
+        const { architectId } = req.params; // Get ID from URL
 
+        const [quotations] = await db.query(
+            `SELECT * FROM quotations WHERE architect = ? ORDER BY id DESC`,
+            [architectId]
+        );
 
+        for (let q of quotations) {
+            const [items] = await db.query(
+                `SELECT qi.*, p.name AS productName
+                 FROM quotation_items qi
+                 LEFT JOIN products p ON p.id = qi.productId
+                 WHERE qi.quotationId = ?`,
+                [q.id]
+            );
+
+            // ... (Your existing logic for delivery challans and batches) ...
+            // This remains the same as your provided code
+            q.items = items;
+        }
+
+        res.json({ success: true, quotations });
+
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
+
+exports.settleCommission = async (req, res) => {
+    const { quotationId, architectId, commissionAmount } = req.body;
+
+    const conn = await db.getConnection();
+    await conn.beginTransaction();
+
+    try {
+        // 🔥 Add this line to make sure the table is created before the INSERT runs
+        await ensureTablesExist(conn);
+
+        // 1. Mark quotation as settled 
+        await conn.query(
+            `UPDATE quotations SET isSettled = TRUE, commissionAmount = ? WHERE id = ?`,
+            [commissionAmount, quotationId]
+        );
+
+        // 2. Insert into the ledger/history table
+        await conn.query(
+            `INSERT INTO architect_ledger (architectId, quotationId, commissionAmount) 
+             VALUES (?, ?, ?)`,
+            [architectId, quotationId, commissionAmount]
+        );
+
+        await conn.commit();
+        res.json({ success: true, message: "Commission settled successfully!" });
+
+    } catch (err) {
+        await conn.rollback();
+        console.error("Settlement Error:", err);
+        res.status(500).json({ success: false, error: err.message });
+    } finally {
+        conn.release();
+    }
+};
+exports.getArchitectLedger = async (req, res) => {
+    // Change 'id' to 'architectId' to match router.get("/.../:architectId")
+    let { architectId } = req.params;
+
+    if (!architectId || architectId === 'undefined') {
+        return res.status(400).json({ success: false, error: "Valid ID required" });
+    }
+
+    try {
+        const [rows] = await db.query(`
+            SELECT 
+                al.id, al.quotationId, al.commissionAmount, al.settledAt,
+                q.clientName, q.grandTotal as quotationTotal
+            FROM architect_ledger al
+            JOIN quotations q ON al.quotationId = q.id
+            WHERE CAST(al.architectId AS CHAR) = CAST(? AS CHAR)
+            ORDER BY al.settledAt DESC
+        `, [architectId]); // Use architectId here
+
+        res.json({ success: true, history: rows });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+};
 // exports.printQuotation = async (req, res) => {
 //     const { id } = req.params;
 
@@ -855,8 +963,8 @@ exports.generateDeliveryChallan = async (req, res) => {
     await conn.beginTransaction();
 
     try {
-       
-       
+
+
         // 2️⃣ Insert Master Record
         const [challan] = await conn.query(
             `INSERT INTO delivery_challan (quotationId, client, contact, address, deliveryBoy, driverContact, tempo) VALUES (?, ?, ?, ?, ?, ?, ?)`,

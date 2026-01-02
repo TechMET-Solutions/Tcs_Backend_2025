@@ -2,12 +2,14 @@
 
 const express = require("express");
 const router = express.Router();
-const { saveQuotation, getAllQuotationsFull, printQuotation, generateDeliveryChallan, getAllDeliveryChallan, printDeliveryChallan, printDeliveryChallan2, updateQuotation } = require("../Controller/quotationController");
+const { saveQuotation, getAllQuotationsFull, printQuotation, generateDeliveryChallan, getAllDeliveryChallan, printDeliveryChallan, printDeliveryChallan2, updateQuotation, getArchitectQuotations, settleCommission, getArchitectLedger } = require("../Controller/quotationController");
 
 router.post("/saveQuotation", saveQuotation);
 router.put("/updateQuotation/:id", updateQuotation);
-
+router.post("/settle-commission", settleCommission);
 router.get("/list", getAllQuotationsFull);
+router.get("/getArchitectQuotations/:architectId", getArchitectQuotations);
+router.get("/getArchitectLedger/:architectId", getArchitectLedger);
 router.get("/print/:id", printQuotation);
 router.post("/generate-dc", generateDeliveryChallan);
 router.get("/delivery-challan/list", getAllDeliveryChallan);
