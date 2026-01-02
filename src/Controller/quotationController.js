@@ -1509,3 +1509,92 @@ exports.printDeliveryChallan2 = async (req, res) => {
         res.status(500).json({ success: false, error: err.message });
     }
 };
+
+
+// ======================= DELETE DELIVERY CHALLAN =======================
+exports.deleteDeliveryChallan = async (req, res) => {
+    const { challanId } = req.params;
+
+    if (!challanId) {
+        return res.status(400).json({ 
+            success: false, 
+            message: "challanId is required" 
+        });
+    }
+
+    const conn = await db.getConnection();
+    await conn.beginTransaction();
+
+    try {
+        // 1️⃣ CHECK IF CHALLAN EXISTS
+        const [[challan]] = await conn.query(
+            `SELECT id FROM delivery_challan WHERE id = ?`,
+            [challanId]
+        );
+
+        if (!challan) {
+            conn.release();
+            return res.status(404).json({ 
+                success: false, 
+                message: "Delivery Challan not found" 
+            });
+        }
+
+        // 2️⃣ GET ITEMS TO RESTORE STOCK
+        const [items] = await conn.query(
+            `SELECT productId, dispatchBoxes, dispatchQty FROM delivery_challan_items WHERE challanId = ?`,
+            [challanId]
+        );
+
+        // 3️⃣ RESTORE STOCK FOR EACH ITEM
+        for (let item of items) {
+            // Restore box quantity
+            await conn.query(
+                `UPDATE products SET availQty = availQty + ? WHERE id = ?`,
+                [item.dispatchBoxes, item.productId]
+            );
+
+            // Restore from product_batches (ADD BACK QTY in FIFO reverse)
+            const [batches] = await conn.query(
+                `SELECT id, qty FROM product_batches WHERE product_id = ? ORDER BY batch_no DESC LIMIT 1`,
+                [item.productId]
+            );
+
+            if (batches.length > 0) {
+                await conn.query(
+                    `UPDATE product_batches SET qty = qty + ? WHERE id = ?`,
+                    [item.dispatchQty, batches[0].id]
+                );
+            }
+        }
+
+        // 4️⃣ DELETE CHALLAN ITEMS
+        await conn.query(
+            `DELETE FROM delivery_challan_items WHERE challanId = ?`,
+            [challanId]
+        );
+
+        // 5️⃣ DELETE CHALLAN MASTER
+        await conn.query(
+            `DELETE FROM delivery_challan WHERE id = ?`,
+            [challanId]
+        );
+
+        await conn.commit();
+        res.json({ 
+            success: true, 
+            message: "Delivery Challan deleted successfully and stock restored!" 
+        });
+
+    } catch (err) {
+        await conn.rollback();
+        console.error("Delete DC Error:", err);
+        res.status(500).json({ 
+            success: false, 
+            error: err.message 
+        });
+    } finally {
+        conn.release();
+    }
+};
+
