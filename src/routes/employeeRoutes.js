@@ -2,12 +2,12 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs'); // ✅ Added this to fix your error
+const fs = require('fs');
 const empCtrl = require('../Controller/employeeController');
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        // Path adjusted to your structure: E:\TCS Backend\uploads\employees
+
         const uploadPath = path.join(__dirname, '../../uploads/employees');
 
         // ✅ Ensure directory exists safely
@@ -24,13 +24,17 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 const cpUpload = upload.fields([
     { name: 'aadhar', maxCount: 1 },
-    { name: 'pancard', maxCount: 1 }
+    { name: 'pancard', maxCount: 1 },
+    { name: 'profile', maxCount: 1 } // <--- Must match formData.append("profile", ...)
 ]);
 
+// The middleware cpUpload MUST come before the controller
 router.post('/add', cpUpload, empCtrl.createEmployee);
 router.put('/update/:id', cpUpload, empCtrl.updateEmployee);
 router.delete('/delete/:id', empCtrl.deleteEmployee);
 router.patch('/status/:id', empCtrl.toggleStatus); // ✅ Use PATCH for status
 router.get('/list', empCtrl.getEmployees);
 router.post("/login", empCtrl.employeeLogin);
+router.post('/punch', empCtrl.punchAttendance);
+router.get("/status/:id", empCtrl.getLastStatus);
 module.exports = router;
