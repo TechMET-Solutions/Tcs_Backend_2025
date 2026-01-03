@@ -143,20 +143,25 @@ exports.updateEmployee = async (req, res) => {
         const { id } = req.params;
         const { name, email, phone, commission, birthdate, salary, expense, advance } = req.body;
 
-        // Base SQL and parameters with simple fallback for numbers
+        // ✅ FIX: Extract only YYYY-MM-DD from the birthdate string
+        // This handles both "2026-01-10T00:00:00.000Z" and "2026-01-10"
+        const formattedBirthdate = birthdate ? birthdate.split('T')[0] : null;
+
+        // Base SQL and parameters
         let updateSql = `UPDATE employees SET name=?, email=?, phone=?, commission=?, birthdate=?, salary=?, expense=?, advance=?`;
         let params = [
             name,
             email,
             phone,
-            commission || 0, // Handle potential null/empty
-            birthdate,
+            commission || 0,
+            formattedBirthdate, // Use the cleaned date here
             salary || 0,
             expense || 0,
             advance || 0
         ];
 
-        // Append photo updates only if files were uploaded
+        // ... [Rest of your photo logic remains the same] ...
+
         if (req.files?.aadhar) {
             updateSql += `, aadhar_photo=?`;
             params.push(req.files.aadhar[0].filename);
@@ -175,13 +180,13 @@ exports.updateEmployee = async (req, res) => {
 
         const [result] = await db.query(updateSql, params);
 
-        // Check if the ID actually existed
         if (result.affectedRows === 0) {
             return res.status(404).json({ success: false, message: "Employee not found" });
         }
 
         res.json({ success: true, message: "Employee updated successfully" });
     } catch (error) {
+        console.error("Update Error:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 };

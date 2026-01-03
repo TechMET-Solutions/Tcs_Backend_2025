@@ -28,7 +28,7 @@ const cpUpload = upload.fields([
     { name: 'profile', maxCount: 1 } // <--- Must match formData.append("profile", ...)
 ]);
 
-// The middleware cpUpload MUST come before the controller
+
 router.post('/add', cpUpload, empCtrl.createEmployee);
 router.put('/update/:id', cpUpload, empCtrl.updateEmployee);
 router.delete('/delete/:id', empCtrl.deleteEmployee);

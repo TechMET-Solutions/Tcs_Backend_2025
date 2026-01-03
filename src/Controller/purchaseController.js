@@ -4,7 +4,48 @@ const db = require("../../Config/database");
 const generateBillNo = () => {
     return "BILL-" + Math.floor(100000 + Math.random() * 900000);
 };
+const ensurePurchaseTablesExist = async (conn) => {
+    // 1. PURCHASES MASTER TABLE
+    await conn.query(`
+        CREATE TABLE IF NOT EXISTS purchases (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            bill_no VARCHAR(50) UNIQUE,
+            purchase_date DATE,
+            client_name VARCHAR(255),
+            client_contact VARCHAR(50),
+            subtotal DECIMAL(12,2),
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
 
+    // 2. PURCHASE ITEMS TABLE
+    await conn.query(`
+        CREATE TABLE IF NOT EXISTS purchase_items (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            purchase_id INT,
+            product_id INT,
+            batch_no VARCHAR(100),
+            qty DECIMAL(10,2),
+            rate DECIMAL(12,2),
+            cov DECIMAL(10,2),
+            total DECIMAL(12,2),
+            godown VARCHAR(100),
+            FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE
+        );
+    `);
+
+    // 3. PRODUCT BATCHES (STOCK) TABLE
+    await conn.query(`
+        CREATE TABLE IF NOT EXISTS product_batches (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            product_id INT,
+            batch_no VARCHAR(100),
+            qty DECIMAL(10,2) DEFAULT 0,
+            location VARCHAR(255),
+            updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        );
+    `);
+};
 // ✅ ADD PURCHASE (FINAL PERFECT CODE)
 // exports.addPurchase = async (req, res) => {
 //     const { purchaseDate, billNo, clientName, clientContact, items, subTotal } = req.body;

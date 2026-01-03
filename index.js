@@ -17,12 +17,26 @@ app.use("/api/Quotation", require("./src/routes/quotationRoutes"));
 app.use("/api/tracking", require("./src/routes/trackingRoutes"));
 app.use("/api/employees", require("./src/routes/employeeRoutes.js"));
 app.use("/api/payment", require("./src/routes/paymentRoutes.js"));
+app.use("/api/roles", require("./src/routes/employeeRoleRoutes.js"));
 app.get("/", (req, res) => {
     res.send("✅ Node.js Server Running...");
 });
 app.use("/assets", express.static(path.join(__dirname, "src/assets")));
 app.use("/uploads", express.static(path.join(__dirname, "./uploads")));
+
 const PORT = process.env.PORT || 5000;
+
+// const DIST_PATH = path.join(__dirname, "../public_html/dist");
+
+
+// app.use(express.static(DIST_PATH));
+
+// app.get(
+//     /^(?!\/(api|assets|uploads|Master|Transactions|Auction|Scheme|bank|account-code|loan-charges|kyc|credit-note|generate-bill|grace-period|roles)).*/,
+//     (req, res) => {
+//         res.sendFile(path.join(DIST_PATH, "index.html"));
+//     }
+// );
 app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
 });
