@@ -255,11 +255,7 @@ exports.employeeLogin = async (req, res) => {
         // =====================
         if (email === "admin@gmail.com" && password === "123") {
             const token = jwt.sign(
-                {
-                    id: 0,
-                    role: "admin",
-                    email: "admin@gmail.com",
-                },
+                { id: 0, role: "admin", email: "admin@gmail.com" },
                 process.env.JWT_SECRET,
                 { expiresIn: process.env.JWT_EXPIRES_IN }
             );
@@ -268,47 +264,51 @@ exports.employeeLogin = async (req, res) => {
                 success: true,
                 role: "admin",
                 token,
-                user: {
-                    name: "Admin",
-                    email: "admin@gmail.com",
-                },
+                user: { name: "Admin", email: "admin@gmail.com" },
+                permissions: {} // Admins usually have all, or an empty object if handled differently
             });
         }
 
         // =====================
         // 👤 EMPLOYEE LOGIN
         // =====================
-        // Directly fetching from employees table
         const [rows] = await db.query(
             "SELECT * FROM employees WHERE email = ?",
             [email]
         );
 
         if (!rows.length) {
-            return res.status(401).json({
-                success: false,
-                message: "Invalid email or password",
-            });
+            return res.status(401).json({ success: false, message: "Invalid email or password" });
         }
 
         const employee = rows[0];
 
-        // ⚠️ Plain password check
+        // ⚠️ Note: In production, use bcrypt.compare(password, employee.password)
         if (employee.password !== password) {
-            return res.status(401).json({
-                success: false,
-                message: "Invalid email or password",
-            });
+            return res.status(401).json({ success: false, message: "Invalid email or password" });
         }
 
         // =====================
-        // 🎫 JWT TOKEN (Removed permissions table logic)
+        // 🛡️ FETCH PERMISSIONS
+        // =====================
+        // Assuming the table 'employee_permissions' has a column 'permissions' (JSON) and 'employee_id'
+        const [permissionRows] = await db.query(
+            "SELECT permissions FROM employee_permissions WHERE employee_id = ?",
+            [employee.id]
+        );
+
+        // If no specific permissions found, default to an empty object
+        const permissions = permissionRows.length > 0 ? permissionRows[0].permissions : {};
+
+        // =====================
+        // 🎫 JWT TOKEN
         // =====================
         const token = jwt.sign(
             {
                 id: employee.id,
                 role: "employee",
                 email: employee.email,
+                permissions: permissions // Include permissions in the token for easy access in middleware
             },
             process.env.JWT_SECRET,
             { expiresIn: process.env.JWT_EXPIRES_IN }
@@ -325,11 +325,13 @@ exports.employeeLogin = async (req, res) => {
                 phone: employee.phone,
                 commission: employee.commission,
                 salary: employee.salary,
-                profile_photo: employee.profile_photo // Included since we added this earlier
+                profile_photo: employee.profile_photo
             },
+            permissions: permissions // Pass the permission JSON to the frontend
         });
 
     } catch (error) {
+        console.error("Login Error:", error);
         res.status(500).json({
             success: false,
             error: error.message,
