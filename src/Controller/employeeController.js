@@ -83,12 +83,16 @@ const ensureAttendanceTable = async () => {
         CREATE TABLE IF NOT EXISTS attendance (
             id INT AUTO_INCREMENT PRIMARY KEY,
             employeeId INT NOT NULL,
-            punch_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            status ENUM('IN', 'OUT') NOT NULL,
-            captured_image VARCHAR(255), 
+            attendance_date DATE NOT NULL,
+            punch_in TIME,
+            punch_out TIME,
+            punch_in_image VARCHAR(255),
+            punch_out_image VARCHAR(255),
             is_verified BOOLEAN DEFAULT FALSE,
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY unique_attendance (employeeId, attendance_date),
             FOREIGN KEY (employeeId) REFERENCES employees(id)
-        )
+);
     `;
     await db.query(sql);
 };
@@ -367,35 +371,145 @@ exports.punchAttendance = async (req, res) => {
     }
 };
 exports.getLastStatus = async (req, res) => {
+    const { employeeId } = req.params;
+    const today = new Date().toISOString().slice(0, 10);
+
+    const [rows] = await db.query(
+        "SELECT punch_in, punch_out FROM attendance WHERE employeeId=? AND attendance_date=?",
+        [employeeId, today]
+    );
+
+    if (!rows.length) {
+        return res.json({ success: true, status: "READY" });
+    }
+
+    if (rows[0].punch_out) {
+        return res.json({ success: true, status: "COMPLETED" });
+    }
+
+    if (rows[0].punch_in) {
+        return res.json({ success: true, status: "IN" });
+    }
+
+    res.json({ success: true, status: "READY" });
+};
+
+
+
+
+// routes/attendance.js
+exports.punchIn = async (req, res) => {
+    const { employeeId, image } = req.body;
+    const today = new Date().toISOString().slice(0, 10);
+
     try {
-        const { id } = req.params;
+        await ensureAttendanceTable();
 
-        // Query to get all punch types for today
-        const sql = `
-            SELECT status 
-            FROM attendance 
-            WHERE employeeId = ? 
-            AND DATE(punch_time) = CURDATE() 
-            ORDER BY punch_time ASC
-        `;
+        const [existing] = await db.query(
+            "SELECT * FROM attendance WHERE employeeId=? AND attendance_date=?",
+            [employeeId, today]
+        );
 
-        const [rows] = await db.query(sql, [id]);
-
-        let finalStatus = null;
-
-        if (rows.length === 0) {
-            finalStatus = "READY"; // No records yet
-        } else if (rows.some(r => r.status === 'OUT')) {
-            finalStatus = "COMPLETED"; // Already punched out once today
-        } else if (rows.some(r => r.status === 'IN')) {
-            finalStatus = "IN"; // Punched in, but not out yet
+        if (existing.length && existing[0].punch_in) {
+            return res.status(400).json({ message: "Already punched in" });
         }
 
-        res.json({
-            success: true,
-            lastStatus: finalStatus
-        });
-    } catch (error) {
-        res.status(500).json({ success: false, error: "Internal Server Error" });
+        await db.query(`
+            INSERT INTO attendance (employeeId, attendance_date, punch_in, punch_in_image, is_verified)
+            VALUES (?, ?, CURTIME(), ?, 1)
+            ON DUPLICATE KEY UPDATE punch_in=CURTIME(), punch_in_image=?`,
+            [employeeId, today, image, image]
+        );
+
+        res.json({ message: "Punch In successful" });
+
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+
+
+
+exports.punchOut = async (req, res) => {
+    const { employeeId, image } = req.body;
+    const today = new Date().toISOString().slice(0, 10);
+
+    try {
+        const [attendance] = await db.query(
+            "SELECT * FROM attendance WHERE employeeId=? AND attendance_date=?",
+            [employeeId, today]
+        );
+
+        if (!attendance.length || !attendance[0].punch_in) {
+            return res.status(400).json({ message: "Punch in first" });
+        }
+
+        if (attendance[0].punch_out) {
+            return res.status(400).json({ message: "Already punched out" });
+        }
+
+        await db.query(`
+            UPDATE attendance
+            SET punch_out=CURTIME(), punch_out_image=?
+            WHERE employeeId=? AND attendance_date=?`,
+            [image, employeeId, today]
+        );
+
+        res.json({ message: "Punch Out successful" });
+
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+
+
+// Month-wise Attendance (React Table ke liye)
+
+exports.MonthAttendance = async (req, res) => {
+    const { employeeId } = req.params;
+    const { month } = req.query; // YYYY-MM
+
+    try {
+        const [rows] = await db.query(
+            `SELECT 
+         attendance_date AS date,
+         TIME_FORMAT(punch_in, '%h:%i %p') AS punchIn,
+         TIME_FORMAT(punch_out, '%h:%i %p') AS punchOut
+       FROM attendance
+       WHERE employeeId=? AND DATE_FORMAT(attendance_date,'%Y-%m')=? 
+       ORDER BY attendance_date DESC`,
+            [employeeId, month]
+        );
+
+        res.json({ records: rows });
+    } catch (err) {
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
+// Attendance Summary API (Stats Cards) GET
+
+exports.attendanceSummary = async (req, res) => {
+    const { employeeId } = req.params;
+    const { month } = req.query;
+
+    try {
+        const [rows] = await db.query(
+            `SELECT 
+        COUNT(*) AS daysPresent,
+        AVG(TIMESTAMPDIFF(MINUTE, punch_in, punch_out))/60 AS avgHours
+       FROM attendance
+       WHERE employeeId=? 
+       AND punch_in IS NOT NULL 
+       AND punch_out IS NOT NULL
+       AND DATE_FORMAT(attendance_date,'%Y-%m')=?`,
+            [employeeId, month]
+        );
+
+        res.json(rows[0]);
+    } catch (err) {
+        res.status(500).json({ message: "Server error" });
     }
 };
