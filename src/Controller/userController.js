@@ -8,7 +8,9 @@ exports.createCustomer = async (req, res) => {
             name,
             Last_Name,
             phone,
+            altphone,
             email,
+            billingName,
             assignedEmployee,
             assignedArchitect,
             status,
@@ -26,7 +28,9 @@ exports.createCustomer = async (req, res) => {
                 name VARCHAR(100) NOT NULL,
                 Last_Name VARCHAR(100),
                 phone VARCHAR(20) NOT NULL,
+                altphone VARCHAR(20),
                 email VARCHAR(100),
+                billingName VARCHAR(100),
                 assignedEmployee VARCHAR(100),
                 assignedArchitect VARCHAR(100),
                 status VARCHAR(50) DEFAULT 'New',
@@ -45,15 +49,17 @@ exports.createCustomer = async (req, res) => {
         // 3️⃣ INSERT DATA (Matching your specific payload)
         const insertSQL = `
             INSERT INTO customers 
-            (name, Last_Name, phone, email, assignedEmployee, assignedArchitect, status, notes, projectName, siteName, siteType, priority)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (name, Last_Name, phone, altphone, email, billingName, assignedEmployee, assignedArchitect, status, notes, projectName, siteName, siteType, priority)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
         const [result] = await db.query(insertSQL, [
             name || null,
             Last_Name || null,
             phone || null,
+            altphone || null,
             email || null,
+            billingName || null,
             assignedEmployee || null,
             assignedArchitect || null,
             status || 'New',
@@ -176,7 +182,7 @@ exports.updateCustomer = async (req, res) => {
     try {
         const { id } = req.params; // Get ID from URL
         const {
-            name, Last_Name, phone, email,
+            name, Last_Name, phone, altphone, email, billingName,
             assignedEmployee, assignedArchitect,
             status, notes, projectName,
             siteName, siteType, priority
@@ -185,7 +191,7 @@ exports.updateCustomer = async (req, res) => {
         const updateSQL = `
             UPDATE customers 
             SET 
-                name = ?, Last_Name = ?, phone = ?, email = ?, 
+                name = ?, Last_Name = ?, phone = ?, altphone = ?, email = ?, billingName = ?,
                 assignedEmployee = ?, assignedArchitect = ?, 
                 status = ?, notes = ?, projectName = ?, 
                 siteName = ?, siteType = ?, priority = ?
@@ -196,7 +202,9 @@ exports.updateCustomer = async (req, res) => {
             name || null,
             Last_Name || null,
             phone || null,
+            altphone || null,
             email || null,
+            billingName || null,
             assignedEmployee || null,
             assignedArchitect || null,
             status || 'New',

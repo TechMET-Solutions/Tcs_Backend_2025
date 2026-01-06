@@ -18,6 +18,7 @@ app.use("/api/tracking", require("./src/routes/trackingRoutes"));
 app.use("/api/employees", require("./src/routes/employeeRoutes.js"));
 app.use("/api/payment", require("./src/routes/paymentRoutes.js"));
 app.use("/api/roles", require("./src/routes/employeeRoleRoutes.js"));
+app.use("/api/suppliers", require("./src/routes/supplierRoutes.js"));
 app.get("/", (req, res) => {
     res.send("✅ Node.js Server Running...");
 });
