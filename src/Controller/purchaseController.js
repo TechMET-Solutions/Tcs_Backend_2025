@@ -242,35 +242,50 @@ exports.addPurchase = async (req, res) => {
 };
 
 
-// ✅ GET ALL PURCHASES + ITEMS
 exports.getAllPurchases = async (req, res) => {
     try {
+        // 1. Capture Pagination Params (Defaults: Page 1, 10 items)
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+
+        // 2. Get Total Count for UI pagination controls
+        const [countResult] = await db.query("SELECT COUNT(*) as total FROM purchases");
+        const totalItems = countResult[0].total;
+
+        // 3. Fetch the Paginated Slice of Purchases
         const [purchases] = await db.query(
-            `SELECT * FROM purchases ORDER BY id DESC`
+            `SELECT * FROM purchases ORDER BY id DESC LIMIT ? OFFSET ?`,
+            [limit, offset]
         );
 
+        // 4. Fetch Nested Items for these specific purchases
         for (let purchase of purchases) {
             const [items] = await db.query(
-                `SELECT id, product_id, batch_no, qty, rate, cov, total, godown
-                 FROM purchase_items
+                `SELECT id, product_id, batch_no, qty, rate, cov, total, godown 
+                 FROM purchase_items 
                  WHERE purchase_id = ?`,
                 [purchase.id]
             );
-
             purchase.items = items;
         }
 
-        res.json({ success: true, purchases });
+        res.json({
+            success: true,
+            purchases,
+            pagination: {
+                totalItems,
+                totalPages: Math.ceil(totalItems / limit),
+                currentPage: page,
+                limit
+            }
+        });
 
     } catch (err) {
         console.log("❌ Get Purchase Error:", err);
-        res.status(500).json({
-            success: false,
-            error: "Failed to fetch purchase data"
-        });
+        res.status(500).json({ success: false, error: "Failed to fetch data" });
     }
 };
-
 
 // ✅ GET SINGLE PURCHASE + ITEMS
 exports.getSinglePurchase = async (req, res) => {

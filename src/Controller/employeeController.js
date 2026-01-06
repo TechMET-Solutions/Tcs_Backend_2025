@@ -220,28 +220,144 @@ exports.toggleStatus = async (req, res) => {
 // GET LIST
 exports.getEmployees = async (req, res) => {
     try {
-        // Construct the base URL dynamically based on the current server host
+        // 1. Get pagination params from query (defaults: page 1, 10 items)
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+
         const imageBaseUrl = `${req.protocol}://${req.get('host')}/uploads/employees/`;
 
-        const [rows] = await db.query("SELECT * FROM employees ORDER BY id DESC");
+        // 2. Get total count for the frontend math
+        const [countResult] = await db.query("SELECT COUNT(*) as total FROM employees");
+        const totalItems = countResult[0].total;
 
-        // Map through the rows to add the base URL to the filenames
+        // 3. Get paginated data using LIMIT and OFFSET
+        const [rows] = await db.query(
+            "SELECT * FROM employees ORDER BY id DESC LIMIT ? OFFSET ?",
+            [limit, offset]
+        );
+
         const employeesWithImages = rows.map(emp => ({
             ...emp,
-            // Attach full URLs for the frontend to use directly
             aadhar_url: emp.aadhar_photo ? `${imageBaseUrl}${emp.aadhar_photo}` : null,
-            pancard_url: emp.pancard_photo ? `${imageBaseUrl}${emp.pancard_photo}` : null
+            pancard_url: emp.pancard_photo ? `${imageBaseUrl}${emp.pancard_photo}` : null,
+            profile_url: emp.profile_photo ? `${imageBaseUrl}${emp.profile_photo}` : null
         }));
 
         res.json({
             success: true,
-            imageBaseUrl, // Also sending separately just in case
-            employees: employeesWithImages
+            employees: employeesWithImages,
+            pagination: {
+                totalItems,
+                totalPages: Math.ceil(totalItems / limit),
+                currentPage: page,
+                limit
+            }
         });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
 };
+
+// exports.employeeLogin = async (req, res) => {
+//     try {
+//         const { email, password } = req.body;
+
+//         if (!email || !password) {
+//             return res.status(400).json({
+//                 success: false,
+//                 message: "Email and password required",
+//             });
+//         }
+
+//         // =====================
+//         // 🔑 ADMIN LOGIN (STATIC)
+//         // =====================
+//         if (email === "admin@gmail.com" && password === "123") {
+//             const token = jwt.sign(
+//                 { id: 0, role: "admin", email: "admin@gmail.com" },
+//                 process.env.JWT_SECRET,
+//                 { expiresIn: process.env.JWT_EXPIRES_IN }
+//             );
+
+//             return res.json({
+//                 success: true,
+//                 role: "admin",
+//                 token,
+//                 user: { name: "Admin", email: "admin@gmail.com" },
+//                 permissions: {} // Admins usually have all, or an empty object if handled differently
+//             });
+//         }
+
+//         // =====================
+//         // 👤 EMPLOYEE LOGIN
+//         // =====================
+//         const [rows] = await db.query(
+//             "SELECT * FROM employees WHERE email = ?",
+//             [email]
+//         );
+
+//         if (!rows.length) {
+//             return res.status(401).json({ success: false, message: "Invalid email or password" });
+//         }
+
+//         const employee = rows[0];
+
+//         // ⚠️ Note: In production, use bcrypt.compare(password, employee.password)
+//         if (employee.password !== password) {
+//             return res.status(401).json({ success: false, message: "Invalid email or password" });
+//         }
+
+//         // =====================
+//         // 🛡️ FETCH PERMISSIONS
+//         // =====================
+//         // Assuming the table 'employee_permissions' has a column 'permissions' (JSON) and 'employee_id'
+//         const [permissionRows] = await db.query(
+//             "SELECT permissions FROM employee_permissions WHERE employee_id = ?",
+//             [employee.id]
+//         );
+
+//         // If no specific permissions found, default to an empty object
+//         const permissions = permissionRows.length > 0 ? permissionRows[0].permissions : {};
+
+//         // =====================
+//         // 🎫 JWT TOKEN
+//         // =====================
+//         const token = jwt.sign(
+//             {
+//                 id: employee.id,
+//                 role: "employee",
+//                 email: employee.email,
+//                 permissions: permissions // Include permissions in the token for easy access in middleware
+//             },
+//             process.env.JWT_SECRET,
+//             { expiresIn: process.env.JWT_EXPIRES_IN }
+//         );
+
+//         res.json({
+//             success: true,
+//             role: "employee",
+//             token,
+//             user: {
+//                 id: employee.id,
+//                 name: employee.name,
+//                 email: employee.email,
+//                 phone: employee.phone,
+//                 commission: employee.commission,
+//                 salary: employee.salary,
+//                 profile_photo: employee.profile_photo
+//             },
+//             permissions: permissions // Pass the permission JSON to the frontend
+//         });
+
+//     } catch (error) {
+//         console.error("Login Error:", error);
+//         res.status(500).json({
+//             success: false,
+//             error: error.message,
+//         });
+//     }
+// };
 
 exports.employeeLogin = async (req, res) => {
     try {
@@ -269,7 +385,7 @@ exports.employeeLogin = async (req, res) => {
                 role: "admin",
                 token,
                 user: { name: "Admin", email: "admin@gmail.com" },
-                permissions: {} // Admins usually have all, or an empty object if handled differently
+                permissions: {}
             });
         }
 
@@ -287,6 +403,16 @@ exports.employeeLogin = async (req, res) => {
 
         const employee = rows[0];
 
+        // 🛡️ STATUS CHECK
+        // If the status is 'inactive', block the login immediately.
+        if (employee.status !== "active") {
+            return res.status(403).json({
+                success: false,
+                message: "Your account is inactive. Please contact support."
+            });
+        }
+
+        // 🔑 PASSWORD CHECK
         // ⚠️ Note: In production, use bcrypt.compare(password, employee.password)
         if (employee.password !== password) {
             return res.status(401).json({ success: false, message: "Invalid email or password" });
@@ -295,13 +421,11 @@ exports.employeeLogin = async (req, res) => {
         // =====================
         // 🛡️ FETCH PERMISSIONS
         // =====================
-        // Assuming the table 'employee_permissions' has a column 'permissions' (JSON) and 'employee_id'
         const [permissionRows] = await db.query(
             "SELECT permissions FROM employee_permissions WHERE employee_id = ?",
             [employee.id]
         );
 
-        // If no specific permissions found, default to an empty object
         const permissions = permissionRows.length > 0 ? permissionRows[0].permissions : {};
 
         // =====================
@@ -312,7 +436,7 @@ exports.employeeLogin = async (req, res) => {
                 id: employee.id,
                 role: "employee",
                 email: employee.email,
-                permissions: permissions // Include permissions in the token for easy access in middleware
+                permissions: permissions
             },
             process.env.JWT_SECRET,
             { expiresIn: process.env.JWT_EXPIRES_IN }
@@ -331,7 +455,7 @@ exports.employeeLogin = async (req, res) => {
                 salary: employee.salary,
                 profile_photo: employee.profile_photo
             },
-            permissions: permissions // Pass the permission JSON to the frontend
+            permissions: permissions
         });
 
     } catch (error) {
@@ -342,7 +466,6 @@ exports.employeeLogin = async (req, res) => {
         });
     }
 };
-
 
 
 exports.punchAttendance = async (req, res) => {

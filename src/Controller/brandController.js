@@ -41,13 +41,30 @@ exports.createBrand = async (req, res) => {
 // ✅ GET ALL BRANDS
 exports.getBrands = async (req, res) => {
     try {
+        // 1. Get page and limit from query parameters (Defaults: Page 1, Limit 10)
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+
+        // 2. Get the total count of brands to calculate total pages
+        const [countResult] = await db.query("SELECT COUNT(*) as total FROM brands");
+        const totalItems = countResult[0].total;
+
+        // 3. Fetch the paginated results
         const [rows] = await db.query(
-            "SELECT * FROM brands ORDER BY id DESC"
+            "SELECT * FROM brands ORDER BY id DESC LIMIT ? OFFSET ?",
+            [limit, offset]
         );
 
         res.json({
             success: true,
             brands: rows,
+            pagination: {
+                totalItems,
+                totalPages: Math.ceil(totalItems / limit),
+                currentPage: page,
+                limit
+            }
         });
     } catch (err) {
         res.status(500).json({

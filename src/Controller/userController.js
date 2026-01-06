@@ -82,19 +82,35 @@ exports.createCustomer = async (req, res) => {
     }
 };
 
-// ✅ GET ALL CUSTOMERS ✅ PROMISE SAFE
+// ✅ GET ALL CUSTOMERS WITH PAGINATION
 exports.getCustomers = async (req, res) => {
     try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+
+        // Get total count for pagination UI
+        const [countResult] = await db.query("SELECT COUNT(*) as total FROM customers");
+        const total = countResult[0].total;
+
+        // Get paginated data
         const [result] = await db.query(
-            "SELECT * FROM customers ORDER BY id DESC"
+            "SELECT * FROM customers ORDER BY id DESC LIMIT ? OFFSET ?",
+            [limit, offset]
         );
 
-        res.json({ success: true, customers: result });
-    } catch (err) {
-        res.status(500).json({
-            success: false,
-            error: err.message,
+        res.json({
+            success: true,
+            customers: result,
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit)
+            }
         });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
     }
 };
 
@@ -150,6 +166,63 @@ exports.getFollowups = async (req, res) => {
     } catch (err) {
         res.status(500).json({
             success: false,
+            error: err.message,
+        });
+    }
+};
+
+
+exports.updateCustomer = async (req, res) => {
+    try {
+        const { id } = req.params; // Get ID from URL
+        const {
+            name, Last_Name, phone, email,
+            assignedEmployee, assignedArchitect,
+            status, notes, projectName,
+            siteName, siteType, priority
+        } = req.body;
+
+        const updateSQL = `
+            UPDATE customers 
+            SET 
+                name = ?, Last_Name = ?, phone = ?, email = ?, 
+                assignedEmployee = ?, assignedArchitect = ?, 
+                status = ?, notes = ?, projectName = ?, 
+                siteName = ?, siteType = ?, priority = ?
+            WHERE id = ?
+        `;
+
+        const [result] = await db.query(updateSQL, [
+            name || null,
+            Last_Name || null,
+            phone || null,
+            email || null,
+            assignedEmployee || null,
+            assignedArchitect || null,
+            status || 'New',
+            notes || null,
+            projectName || null,
+            siteName || null,
+            siteType || null,
+            priority || 'Low',
+            id
+        ]);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: "Customer not found" });
+        }
+
+        res.json({
+            success: true,
+            message: "✅ Customer updated successfully",
+            data: { id, name, projectName }
+        });
+
+    } catch (err) {
+        console.error("Update Error:", err);
+        res.status(500).json({
+            success: false,
+            message: "Failed to update customer",
             error: err.message,
         });
     }

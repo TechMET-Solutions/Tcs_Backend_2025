@@ -41,19 +41,33 @@ exports.createQuality = async (req, res) => {
 // ✅ GET ALL QUALITIES
 exports.getQualities = async (req, res) => {
     try {
+        // 1. Get page and limit from query parameters
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+
+        // 2. Get the total count of qualities for pagination math
+        const [countResult] = await db.query("SELECT COUNT(*) as total FROM qualities");
+        const totalItems = countResult[0].total;
+
+        // 3. Fetch the specific slice of data
         const [rows] = await db.query(
-            "SELECT * FROM qualities ORDER BY id DESC"
+            "SELECT * FROM qualities ORDER BY id DESC LIMIT ? OFFSET ?",
+            [limit, offset]
         );
 
         res.json({
             success: true,
             qualities: rows,
+            pagination: {
+                totalItems,
+                totalPages: Math.ceil(totalItems / limit),
+                currentPage: page,
+                limit
+            }
         });
     } catch (err) {
-        res.status(500).json({
-            success: false,
-            error: err.message,
-        });
+        res.status(500).json({ success: false, error: err.message });
     }
 };
 

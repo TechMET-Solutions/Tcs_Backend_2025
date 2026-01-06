@@ -117,8 +117,22 @@ exports.addProduct = async (req, res) => {
 // GET ALL PRODUCTS WITH BATCHES
 exports.getProducts = async (req, res) => {
     try {
-        const [products] = await db.query("SELECT * FROM products ORDER BY id DESC");
+        // 1. Pagination Parameters
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
 
+        // 2. Get Total Count for UI calculation
+        const [countResult] = await db.query("SELECT COUNT(*) as total FROM products");
+        const totalItems = countResult[0].total;
+
+        // 3. Fetch Paginated Products
+        const [products] = await db.query(
+            "SELECT * FROM products ORDER BY id DESC LIMIT ? OFFSET ?",
+            [limit, offset]
+        );
+
+        // 4. Attach Batches and Image URLs
         for (let product of products) {
             const [batches] = await db.query(
                 "SELECT batch_no, qty, location FROM product_batches WHERE product_id = ?",
@@ -126,8 +140,6 @@ exports.getProducts = async (req, res) => {
             );
 
             product.batches = batches;
-
-            // Create image URL
             product.image_url = product.image
                 ? `${req.protocol}://${req.get("host")}/uploads/${product.image}`
                 : null;
@@ -135,7 +147,13 @@ exports.getProducts = async (req, res) => {
 
         res.json({
             success: true,
-            products
+            products,
+            pagination: {
+                totalItems,
+                totalPages: Math.ceil(totalItems / limit),
+                currentPage: page,
+                limit
+            }
         });
 
     } catch (error) {

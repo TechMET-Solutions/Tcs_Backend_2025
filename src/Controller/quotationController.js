@@ -393,42 +393,23 @@ exports.updateQuotation = async (req, res) => {
 
 exports.getAllQuotationsFull = async (req, res) => {
     try {
+        // 1. Pagination Parameters
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
 
-        // ⭐ Ensure DC tables exist before using them
-        await db.query(`
-            CREATE TABLE IF NOT EXISTS delivery_challan (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                quotationId INT,
-                client VARCHAR(255),
-                contact VARCHAR(50),
-                address TEXT,
-                deliveryBoy VARCHAR(255),
-                driverContact VARCHAR(50),
-                tempo VARCHAR(50),
-                createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        `);
+        // 2. Get Total Count for UI calculation
+        const [countResult] = await db.query("SELECT COUNT(*) as total FROM quotations");
+        const totalItems = countResult[0].total;
 
-        await db.query(`
-            CREATE TABLE IF NOT EXISTS delivery_challan_items (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                challanId INT,
-                productId INT,
-                productName VARCHAR(255),
-                dispatchBoxes INT,
-                dispatchQty INT,
-                remainingStock INT,
-                FOREIGN KEY (challanId) REFERENCES delivery_challan(id)
-            );
-        `);
-
-        // 1️⃣ GET ALL QUOTATIONS
+        // 3. Fetch ONLY the Quotations for this page
         const [quotations] = await db.query(
-            `SELECT * FROM quotations ORDER BY id DESC`
+            `SELECT * FROM quotations ORDER BY id DESC LIMIT ? OFFSET ?`,
+            [limit, offset]
         );
 
+        // 4. Fill in nested data for the 10 selected quotations
         for (let q of quotations) {
-
             const [items] = await db.query(
                 `SELECT qi.*, p.name AS productName
                  FROM quotation_items qi
@@ -438,8 +419,7 @@ exports.getAllQuotationsFull = async (req, res) => {
             );
 
             for (let item of items) {
-
-                // GET PREVIOUS DELIVERIES
+                // Fetch Delivery Challan data for this item
                 const [[dc]] = await db.query(
                     `SELECT 
                         IFNULL(SUM(dispatchBoxes), 0) AS dispatchedBoxes,
@@ -452,28 +432,30 @@ exports.getAllQuotationsFull = async (req, res) => {
 
                 item.dispatchedBoxes = dc.dispatchedBoxes;
                 item.dispatchedQty = dc.dispatchedQty;
+                item.remainingBoxes = Math.max(0, item.box - dc.dispatchedBoxes);
+                item.remainingQty = Math.max(0, item.area - dc.dispatchedQty);
 
-                item.remainingBoxes = item.box - dc.dispatchedBoxes;
-                item.remainingQty = item.area - dc.dispatchedQty;
-
-                if (item.remainingBoxes < 0) item.remainingBoxes = 0;
-                if (item.remainingQty < 0) item.remainingQty = 0;
-
+                // Fetch Batches
                 const [batches] = await db.query(
-                    `SELECT batch_no, qty, location 
-                     FROM product_batches 
-                     WHERE product_id = ?`,
+                    `SELECT batch_no, qty, location FROM product_batches WHERE product_id = ?`,
                     [item.productId]
                 );
-
                 item.batches = batches;
                 item.currentStock = batches.reduce((s, b) => s + b.qty, 0);
             }
-
             q.items = items;
         }
 
-        res.json({ success: true, quotations });
+        res.json({
+            success: true,
+            quotations,
+            pagination: {
+                totalItems,
+                totalPages: Math.ceil(totalItems / limit),
+                currentPage: page,
+                limit
+            }
+        });
 
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
@@ -790,7 +772,7 @@ exports.printQuotation = async (req, res) => {
                   <td>${i + 1}</td>
                   <td>${mode === "qname" ? it.productName : it.productId}</td>
                   <td>${it.size}</td>
-                  <td class="img-cell"><img src="http://localhost:5000/uploads/${it.productImage}" /></td>
+                  <td class="img-cell"><img src="https://dashboard.theceramicstudio.in/uploads/${it.productImage}" /></td>
                   <td>${it.quality}</td>
                   <td>${rate.toFixed(2)}</td>
                   <td>${it.discount}</td>
@@ -854,7 +836,7 @@ exports.printQuotation = async (req, res) => {
     <body>
 
       <div class="header-section">
-        <img src="http://localhost:5000/assets/tcslog.png" class="logo" />
+        <img src="https://dashboard.theceramicstudio.in/assets/tcslog.png" class="logo" />
         <div class="address">
           Shop no. 18, Business Bay, Shree Hari Kute Marg, Tidke Colony, Mumbai Naka, Nashik - 422002<br>
           Contact: 8847788888, 7058859999, Email: support@theceramicstudio.in
@@ -1187,7 +1169,7 @@ exports.printDeliveryChallan = async (req, res) => {
 <div class="page">
     <table class="header-table">
         <tr>
-            <td width="20%"><img src="http://localhost:5000/uploads" /></td>
+            <td width="20%"><img src="https://dashboard.theceramicstudio.in/uploads" /></td>
             <td class="business-info">
                 <h1 class="business-name">The Ceramic Studio</h1>
                 <div style="font-size: 11px; font-weight: bold;">
@@ -1396,7 +1378,7 @@ exports.printDeliveryChallan2 = async (req, res) => {
 <div class="page">
     <table class="header-table">
         <tr>
-            <td width="20%"><img src="http://localhost:5000/uploads" /></td>
+            <td width="20%"><img src="https://dashboard.theceramicstudio.in/uploads" /></td>
             <td class="business-info">
                 <h1 class="business-name">The Ceramic Studio</h1>
                 <div style="font-size: 11px; font-weight: bold;">

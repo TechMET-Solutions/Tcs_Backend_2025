@@ -41,13 +41,30 @@ exports.createCategory = async (req, res) => {
 // ✅ GET ALL CATEGORIES
 exports.getCategories = async (req, res) => {
     try {
+        // 1. Extract pagination parameters (Default: Page 1, Limit 10)
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+
+        // 2. Get total count for the frontend to calculate total pages
+        const [countResult] = await db.query("SELECT COUNT(*) as total FROM categories");
+        const totalItems = countResult[0].total;
+
+        // 3. Fetch only the required rows
         const [rows] = await db.query(
-            "SELECT * FROM categories ORDER BY id DESC"
+            "SELECT * FROM categories ORDER BY id DESC LIMIT ? OFFSET ?",
+            [limit, offset]
         );
 
         res.json({
             success: true,
             categories: rows,
+            pagination: {
+                totalItems,
+                totalPages: Math.ceil(totalItems / limit),
+                currentPage: page,
+                limit
+            }
         });
     } catch (err) {
         res.status(500).json({

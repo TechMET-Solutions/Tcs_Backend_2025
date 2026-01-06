@@ -6,5 +6,5 @@ router.post("/add", customerController.createCustomer);
 router.get("/list", customerController.getCustomers);
 router.post("/followup/add", customerController.addFollowup);
 router.get("/followups/:id", customerController.getFollowups);
-
+router.put("/update/:id", customerController.updateCustomer);
 module.exports = router;
