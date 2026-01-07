@@ -11,6 +11,7 @@ const ensureTablesExist = async (conn) => {
             id INT AUTO_INCREMENT PRIMARY KEY,
             clientName VARCHAR(255),
             contactNo VARCHAR(50),
+            altContactNo VARCHAR(50),
             gstNo VARCHAR(50),
             email VARCHAR(255),
             address TEXT,
@@ -71,6 +72,34 @@ const ensureTablesExist = async (conn) => {
     await conn.query(`
         ALTER TABLE products 
         ADD COLUMN IF NOT EXISTS availQty INT DEFAULT 0;
+    `);
+    // ⭐ delivery_challan TABLE
+    await conn.query(`
+        CREATE TABLE IF NOT EXISTS delivery_challan (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            quotationId INT,
+            client VARCHAR(255),
+            contact VARCHAR(50),
+            address TEXT,
+            deliveryBoy VARCHAR(255),
+            driverContact VARCHAR(50),
+            tempo VARCHAR(50)
+        );
+
+    `);
+    // ⭐ delivery_challan_items TABLE
+    await conn.query(`
+       CREATE TABLE IF NOT EXISTS delivery_challan_items (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            challanId INT,
+            productId INT,
+            productName VARCHAR(255),
+            dispatchBoxes INT,
+            dispatchQty INT,
+            remainingStock INT,
+            FOREIGN KEY (challanId) REFERENCES delivery_challan(id)
+        );
+
     `);
 };
 
@@ -278,7 +307,7 @@ exports.getAllQuotationsFull = async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
-        await ensureTablesExist(conn);
+        // await ensureTablesExist(conn);
         // 2. Get Total Count for UI calculation
         const [countResult] = await db.query("SELECT COUNT(*) as total FROM quotations");
         const totalItems = countResult[0].total;
