@@ -76,84 +76,6 @@ const ensureTablesExist = async (conn) => {
 
 
 
-// exports.saveQuotation = async (req, res) => {
-//     const {
-//         clientDetails,
-//         headerSection,
-//         bottomSection,
-//         rows,
-//         grandTotal,
-//     } = req.body;
-
-//     const conn = await db.getConnection();
-//     await conn.beginTransaction();
-//     ensureTablesExist(conn)
-//     try {
-//         // 1️⃣ INSERT QUOTATION MASTER (Fixed placeholders: 9 columns, 9 ?)
-//         const [quotation] = await conn.query(
-//             `INSERT INTO quotations 
-//                 (clientName, contactNo, email, address, attendedBy, architect, headerSection, bottomSection, grandTotal, gstNo)
-//              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-//             [
-//                 clientDetails.name,
-//                 clientDetails.contactNo,
-//                 clientDetails.email || null,
-//                 clientDetails.address,
-//                 clientDetails.attendedBy || 'System', // Fallback if missing
-//                 clientDetails.architect,
-//                 headerSection,
-//                 bottomSection,
-//                 grandTotal,
-//                 clientDetails.gstNo,
-//             ]
-//         );
-
-//         const quotationId = quotation.insertId;
-
-//         // 2️⃣ INSERT ITEMS + UPDATE STOCK
-//         for (let r of rows) {
-//             // Ensure area exists, default to 0 if not provided in payload
-//             const itemArea = r.area || 0;
-
-//             await conn.query(
-//                 `INSERT INTO quotation_items
-//                   (quotationId, productId, size, quality, rate, cov, box, weight, discount, total, area)
-//                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-//                 [
-//                     quotationId,
-//                     r.productId,
-//                     r.size,
-//                     r.quality,
-//                     r.rate,
-//                     r.cov,
-//                     r.box,
-//                     r.weight || 0,
-//                     r.discount || 0,
-//                     r.total,
-//                     itemArea
-//                 ]
-//             );
-
-//             // 🔥 Update Stock - Subtracting 'box' count from 'availQty'
-//             await conn.query(
-//                 `UPDATE products 
-//                  SET availQty = GREATEST(availQty - ?, 0)
-//                  WHERE id = ?`,
-//                 [r.box, r.productId]
-//             );
-//         }
-
-//         await conn.commit();
-//         res.json({ success: true, message: "Quotation saved successfully!", id: quotationId });
-
-//     } catch (err) {
-//         await conn.rollback();
-//         console.error("Error saving quotation:", err);
-//         res.status(500).json({ success: false, error: err.message });
-//     } finally {
-//         conn.release();
-//     }
-// };
 exports.saveQuotation = async (req, res) => {
     const {
         clientDetails,
@@ -167,10 +89,10 @@ exports.saveQuotation = async (req, res) => {
     await conn.beginTransaction();
 
     try {
-        await ensureTablesExist(conn); // Ensure tables are ready
+        await ensureTablesExist(conn);
 
-        // 1️⃣ INSERT QUOTATION MASTER
-        // Added 'paid_amount' and 'due_amount' to the column list and values
+        // 1️⃣ Insert Master Record
+        // We use clientDetails.architect to link the commission later
         const [quotation] = await conn.query(
             `INSERT INTO quotations 
                 (clientName, contactNo, email, address, attendedBy, architect, headerSection, bottomSection, grandTotal, gstNo, paid_amount, due_amount)
@@ -185,28 +107,45 @@ exports.saveQuotation = async (req, res) => {
                 headerSection,
                 bottomSection,
                 grandTotal,
-                clientDetails.gstNo,
-                0.00,        // paid_amount starts at 0
-                grandTotal   // due_amount starts as the full grandTotal
+                clientDetails.gstNo || '',
+                0.00,        // Initial Paid
+                grandTotal   // Initial Due
             ]
         );
 
         const quotationId = quotation.insertId;
 
-        // 2️⃣ INSERT ITEMS + UPDATE STOCK (Your existing loop)
+        // 2️⃣ Insert Items (Saving your manual 'Area')
         for (let r of rows) {
-            const itemArea = r.area || 0;
+            // Use the area manually entered from frontend row
+            const itemArea = parseFloat(r.Area) || 0;
+
             await conn.query(
                 `INSERT INTO quotation_items
                   (quotationId, productId, size, quality, rate, cov, box, weight, discount, total, area)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [quotationId, r.productId, r.size, r.quality, r.rate, r.cov, r.box, r.weight || 0, r.discount || 0, r.total, itemArea]
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    quotationId,
+                    r.productId,
+                    r.size || '',
+                    r.quality || '',
+                    parseFloat(r.rate) || 0,
+                    parseFloat(r.cov) || 0,
+                    parseInt(r.box) || 0,
+                    parseFloat(r.Weight) || 0,
+                    parseFloat(r.discount) || 0,
+                    parseFloat(r.total) || 0,
+                    itemArea // This stores your manual typing
+                ]
             );
 
-            await conn.query(
-                `UPDATE products SET availQty = GREATEST(availQty - ?, 0) WHERE id = ?`,
-                [r.box, r.productId]
-            );
+            // 3️⃣ Update Stock
+            if (r.productId) {
+                await conn.query(
+                    `UPDATE products SET availQty = GREATEST(availQty - ?, 0) WHERE id = ?`,
+                    [parseInt(r.box) || 0, r.productId]
+                );
+            }
         }
 
         await conn.commit();
@@ -220,114 +159,56 @@ exports.saveQuotation = async (req, res) => {
         conn.release();
     }
 };
+
+
 exports.updateQuotation = async (req, res) => {
     const quotationId = req.params.id;
-    const {
-        clientDetails,
-        headerSection,
-        bottomSection,
-        rows,
-        grandTotal,
-    } = req.body;
-
-    if (!quotationId) {
-        return res.status(400).json({ success: false, message: "quotationId is required" });
-    }
+    const { clientDetails, headerSection, bottomSection, rows, grandTotal } = req.body;
 
     const conn = await db.getConnection();
     await conn.beginTransaction();
 
     try {
-        ensureTablesExist(conn);
-
-        // 1️⃣ Restore stock from existing quotation items
+        // 1️⃣ Restore Stock
         const [oldItems] = await conn.query(
             `SELECT productId, box FROM quotation_items WHERE quotationId = ?`,
             [quotationId]
         );
-
         for (let item of oldItems) {
-            await conn.query(
-                `UPDATE products 
-                 SET availQty = availQty + ? 
-                 WHERE id = ?`,
-                [item.box, item.productId]
-            );
+            await conn.query(`UPDATE products SET availQty = availQty + ? WHERE id = ?`, [item.box, item.productId]);
         }
 
-        // 2️⃣ Update quotation master
+        // 2️⃣ Update Master
         await conn.query(
-            `UPDATE quotations SET
-                clientName = ?,
-                contactNo = ?,
-                email = ?,
-                address = ?,
-                attendedBy = ?,
-                gstNo = ?,
-                architect = ?,
-                headerSection = ?,
-                bottomSection = ?,
-                grandTotal = ?
+            `UPDATE quotations SET 
+                clientName=?, contactNo=?, email=?, address=?, attendedBy=?, architect=?, 
+                headerSection=?, bottomSection=?, grandTotal=?, gstNo=?, due_amount = (? - paid_amount)
              WHERE id = ?`,
             [
-                clientDetails.name,
-                clientDetails.contactNo,
-                clientDetails.email || null,
-                clientDetails.address,
-                clientDetails.attendedBy || 'System',
-                clientDetails.gstNo || '',
-                clientDetails.architect,
-                headerSection,
-                bottomSection,
-                grandTotal,
-                quotationId
+                clientDetails.name, clientDetails.contactNo, clientDetails.email, clientDetails.address,
+                clientDetails.attendedBy, clientDetails.architect, headerSection, bottomSection,
+                grandTotal, clientDetails.gstNo, grandTotal, quotationId
             ]
         );
 
-        // 3️⃣ Delete old quotation items
-        await conn.query(
-            `DELETE FROM quotation_items WHERE quotationId = ?`,
-            [quotationId]
-        );
+        // 3️⃣ Replace Items
+        await conn.query(`DELETE FROM quotation_items WHERE quotationId = ?`, [quotationId]);
 
-        // 4️⃣ Insert updated items + deduct stock
         for (let r of rows) {
-            const itemArea = r.area || 0;
-
+            const itemArea = parseFloat(r.Area) || 0;
             await conn.query(
-                `INSERT INTO quotation_items
-                    (quotationId, productId, size, quality, rate, cov, box, weight, discount, total, area)
+                `INSERT INTO quotation_items (quotationId, productId, size, quality, rate, cov, box, weight, discount, total, area)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [
-                    quotationId,
-                    r.productId,
-                    r.size,
-                    r.quality,
-                    r.rate,
-                    r.cov,
-                    r.box,
-                    r.weight || 0,
-                    r.discount || 0,
-                    r.total,
-                    itemArea
-                ]
+                [quotationId, r.productId, r.size, r.quality, r.rate, r.cov, r.box, r.Weight, r.discount, r.total, itemArea]
             );
 
-            // Deduct stock
-            await conn.query(
-                `UPDATE products 
-                 SET availQty = GREATEST(availQty - ?, 0)
-                 WHERE id = ?`,
-                [r.box, r.productId]
-            );
+            await conn.query(`UPDATE products SET availQty = GREATEST(availQty - ?, 0) WHERE id = ?`, [r.box, r.productId]);
         }
 
         await conn.commit();
         res.json({ success: true, message: "Quotation updated successfully!" });
-
     } catch (err) {
         await conn.rollback();
-        console.error("Error updating quotation:", err);
         res.status(500).json({ success: false, error: err.message });
     } finally {
         conn.release();
@@ -397,7 +278,7 @@ exports.getAllQuotationsFull = async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
-
+        await ensureTablesExist(conn);
         // 2. Get Total Count for UI calculation
         const [countResult] = await db.query("SELECT COUNT(*) as total FROM quotations");
         const totalItems = countResult[0].total;
