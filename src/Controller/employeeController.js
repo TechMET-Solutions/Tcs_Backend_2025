@@ -493,6 +493,7 @@ exports.punchAttendance = async (req, res) => {
         res.status(500).json({ success: false, error: "Internal Server Error" });
     }
 };
+
 exports.getLastStatus = async (req, res) => {
     const { employeeId } = req.params;
     const today = new Date().toISOString().slice(0, 10);
@@ -502,22 +503,12 @@ exports.getLastStatus = async (req, res) => {
         [employeeId, today]
     );
 
-    if (!rows.length) {
-        return res.json({ success: true, status: "READY" });
-    }
-
-    if (rows[0].punch_out) {
-        return res.json({ success: true, status: "COMPLETED" });
-    }
-
-    if (rows[0].punch_in) {
-        return res.json({ success: true, status: "IN" });
-    }
+    if (!rows.length) return res.json({ success: true, status: "READY" });
+    if (rows[0].punch_out) return res.json({ success: true, status: "COMPLETED" });
+    if (rows[0].punch_in) return res.json({ success: true, status: "IN" });
 
     res.json({ success: true, status: "READY" });
 };
-
-
 
 
 // routes/attendance.js
