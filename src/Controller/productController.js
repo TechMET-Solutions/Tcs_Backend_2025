@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS products (
     link TEXT,
     godown TEXT,
     description TEXT,
-    Cov VARCHAR(100),
+    cov VARCHAR(100),
     image TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -47,7 +47,7 @@ exports.addProduct = async (req, res) => {
             godown,
             description,
             batches,
-            Cov
+            cov
         } = req.body;
 
         const image = req.file ? req.file.filename : null;
@@ -62,7 +62,7 @@ exports.addProduct = async (req, res) => {
         // Insert product
         const insertProductSQL = `
             INSERT INTO products 
-            (name, size, brand, category, quality, rate, status, link, godown, description, image, Cov)
+            (name, size, brand, category, quality, rate, status, link, godown, description, image, cov)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
@@ -80,7 +80,7 @@ exports.addProduct = async (req, res) => {
             godownValue,
             description,
             image,
-            Cov
+            cov
         ]);
 
         const productId = productResult.insertId;

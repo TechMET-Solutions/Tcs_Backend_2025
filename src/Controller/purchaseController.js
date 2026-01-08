@@ -140,7 +140,7 @@ exports.addPurchase = async (req, res) => {
 
     try {
         const finalBill = billNo && billNo.trim() !== "" ? billNo : generateBillNo();
-
+        await ensurePurchaseTablesExist(conn);
         // 1️⃣ INSERT PURCHASE
         const [purchaseResult] = await conn.query(
             `INSERT INTO purchases 
