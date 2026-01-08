@@ -55,6 +55,39 @@ const loadModels = async () => {
         throw err; // Send this up to the punchAttendance catch block
     }
 };
+// Helper to ensure roles table exists (for admin/superadmin login)
+const ensureRolesTable = async () => {
+    const sql = `
+        CREATE TABLE IF NOT EXISTS roles (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            email VARCHAR(100) NOT NULL UNIQUE,
+            password VARCHAR(100) NOT NULL,
+            role ENUM('admin', 'superadmin') NOT NULL,
+            status ENUM('active', 'blocked') DEFAULT 'active',
+            createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+    `;
+    await db.query(sql);
+
+    // Check if default records exist, if not insert them
+    // const [checkAdmin] = await db.query("SELECT * FROM roles WHERE email = ?", ["admin@gmail.com"]);
+    // if (checkAdmin.length === 0) {
+    //     await db.query(
+    //         "INSERT INTO roles (email, password, role, status) VALUES (?, ?, ?, ?)",
+    //         ["admin@gmail.com", "123", "admin", "active"]
+    //     );
+    // }
+
+    // const [checkSuperAdmin] = await db.query("SELECT * FROM roles WHERE email = ?", ["superadmin@gmail.com"]);
+    // if (checkSuperAdmin.length === 0) {
+    //     await db.query(
+    //         "INSERT INTO roles (email, password, role, status) VALUES (?, ?, ?, ?)",
+    //         ["superadmin@gmail.com", "123", "superadmin", "active"]
+    //     );
+    // }
+};
+
 // Helper to ensure table exists with document columns
 const ensureEmployeesTable = async () => {
     const sql = `
@@ -371,20 +404,43 @@ exports.employeeLogin = async (req, res) => {
         }
 
         // =====================
-        // 🔑 ADMIN LOGIN (STATIC)
+        // 🔑 ADMIN/SUPERADMIN LOGIN (FROM ROLES TABLE)
         // =====================
-        if (email === "admin@gmail.com" && password === "123") {
+        await ensureRolesTable(); // Ensure table and default records exist
+
+        const [roleRows] = await db.query(
+            "SELECT * FROM roles WHERE email = ?",
+            [email]
+        );
+
+        if (roleRows.length > 0) {
+            const roleUser = roleRows[0];
+
+            // Check status
+            if (roleUser.status !== "active") {
+                return res.status(403).json({
+                    success: false,
+                    message: "Your account is inactive. Please contact support."
+                });
+            }
+
+            // Verify password
+            if (roleUser.password !== password) {
+                return res.status(401).json({ success: false, message: "Invalid email or password" });
+            }
+
+            // Generate token for admin/superadmin
             const token = jwt.sign(
-                { id: 0, role: "admin", email: "admin@gmail.com" },
+                { id: roleUser.id, role: roleUser.role, email: roleUser.email },
                 process.env.JWT_SECRET,
                 { expiresIn: process.env.JWT_EXPIRES_IN }
             );
 
             return res.json({
                 success: true,
-                role: "admin",
+                role: roleUser.role,
                 token,
-                user: { name: "Admin", email: "admin@gmail.com" },
+                user: { name: roleUser.role.charAt(0).toUpperCase() + roleUser.role.slice(1), email: roleUser.email },
                 permissions: {}
             });
         }
@@ -578,6 +634,136 @@ exports.punchOut = async (req, res) => {
 };
 
 
+
+// =====================
+// 👑 ROLE MANAGEMENT ENDPOINTS
+// =====================
+
+// Get all roles (admin/superadmin)
+exports.getAllRoles = async (req, res) => {
+    try {
+        await ensureRolesTable();
+        const [rows] = await db.query("SELECT id, email, role, status, createdAt FROM roles ORDER BY id DESC");
+        res.json({ success: true, roles: rows });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// Create new role (Admin/Superadmin)
+exports.createRole = async (req, res) => {
+    try {
+        await ensureRolesTable();
+        const { email, password, role } = req.body;
+
+        if (!email || !password || !role) {
+            return res.status(400).json({ success: false, message: "Email, password, and role required" });
+        }
+
+        if (!["admin", "superadmin"].includes(role)) {
+            return res.status(400).json({ success: false, message: "Role must be 'admin' or 'superadmin'" });
+        }
+
+        const sql = "INSERT INTO roles (email, password, role, status) VALUES (?, ?, ?, ?)";
+        await db.query(sql, [email, password, role, "active"]);
+
+        res.status(201).json({ success: true, message: "Role created successfully" });
+    } catch (error) {
+        if (error.code === "ER_DUP_ENTRY") {
+            res.status(400).json({ success: false, message: "Email already exists" });
+        } else {
+            res.status(500).json({ success: false, error: error.message });
+        }
+    }
+};
+
+// Update role
+exports.updateRole = async (req, res) => {
+    try {
+        await ensureRolesTable();
+        const { id } = req.params;
+        const { email, password, role, status } = req.body;
+
+        let updateSql = "UPDATE roles SET ";
+        let params = [];
+        let updates = [];
+
+        if (email !== undefined) {
+            updates.push("email = ?");
+            params.push(email);
+        }
+        if (password !== undefined) {
+            updates.push("password = ?");
+            params.push(password);
+        }
+        if (role !== undefined) {
+            updates.push("role = ?");
+            params.push(role);
+        }
+        if (status !== undefined) {
+            updates.push("status = ?");
+            params.push(status);
+        }
+
+        if (updates.length === 0) {
+            return res.status(400).json({ success: false, message: "No fields to update" });
+        }
+
+        updateSql += updates.join(", ") + " WHERE id = ?";
+        params.push(id);
+
+        const [result] = await db.query(updateSql, params);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: "Role not found" });
+        }
+
+        res.json({ success: true, message: "Role updated successfully" });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// Delete role
+exports.deleteRole = async (req, res) => {
+    try {
+        await ensureRolesTable();
+        const { id } = req.params;
+
+        const [result] = await db.query("DELETE FROM roles WHERE id = ?", [id]);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: "Role not found" });
+        }
+
+        res.json({ success: true, message: "Role deleted successfully" });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+// Toggle role status
+exports.toggleRoleStatus = async (req, res) => {
+    try {
+        await ensureRolesTable();
+        const { id } = req.params;
+        const { status } = req.body;
+
+        if (!["active", "blocked"].includes(status)) {
+            return res.status(400).json({ success: false, message: "Status must be 'active' or 'blocked'" });
+        }
+
+        const [result] = await db.query("UPDATE roles SET status = ? WHERE id = ?", [status, id]);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: "Role not found" });
+        }
+
+        res.json({ success: true, message: `Role ${status}` });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
 
 // Month-wise Attendance (React Table ke liye)
 
