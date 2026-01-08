@@ -869,7 +869,9 @@ exports.printQuotation = async (req, res) => {
              JOIN products p ON p.id = qi.productId
              WHERE quotationId = ?`, [id]
         );
-
+        const addDisc = Number(quotation.additionalDiscount || 0);
+        const HeaderSection = quotation.headerSection;
+        const bottomSection = quotation.bottomSection;
         const codeHeaderLabel = mode === "qname" ? "Product Name" : "Code";
 
         let runningGrandTotal = 0;
@@ -948,7 +950,7 @@ exports.printQuotation = async (req, res) => {
           <td style="width: 60%;">
             <strong>To,</strong><br>
             &nbsp;&nbsp;&nbsp;&nbsp;${quotation.clientName} (${quotation.contactNo})<br>
-            <strong>Attended By:</strong> ${quotation.attendedBy || ''} (${quotation.attendee_contact || ''})
+           
           </td>
           <td style="width: 40%; text-align: right;">
             <strong>Date:</strong> ${new Date(quotation.createdAt).toLocaleDateString('en-GB')}
@@ -980,6 +982,12 @@ exports.printQuotation = async (req, res) => {
             <td colspan="10" class="summary-label">Grand Total</td>
             <td>${runningGrandTotal.toFixed(2)}/-</td>
           </tr>
+          ${addDisc > 0 ? `
+          <tr>
+            <td colspan="10" class="summary-label">Additional Discount</td>
+            <td class="summary-value">${addDisc.toFixed(2)} %</td>
+          </tr>` : ''}
+          <tr>
           ${quotation.discount && quotation.discount > 0 ? `
           <tr>
             <td colspan="10" class="summary-label">Discount (${quotation.discount}%)</td>
@@ -1001,33 +1009,9 @@ exports.printQuotation = async (req, res) => {
       </table>
 
       <div class="terms-section">
-        <p>Above rates are including GST @ 18%, Excluding unloading charge and this are Nashik warehouse rates.</p>
-        <p>Please be aware that during transport, there is a possibility of up to 3% breakage, for which we kindly ask for your understanding and responsibility.</p>
+        ${HeaderSection}
         
-        <div style="margin-top: 10px;">
-            <strong>Payment Terms :</strong> 100% Advance<br>
-            <strong>Delivery Period :</strong> 7 TO 8 Days from the date of order / dispatch schedule.<br>
-            <strong>Billing :</strong> GST Billing @ 18%<br>
-            <strong>Validity Of Price :</strong> 30 Days from Date of Quotation
-        </div>
-
-        <div class="bank-details">
-          <strong>BANK DETAILS :</strong><br>
-          <strong>Yes Bank :</strong> THE CERAMIC STUDIO<br>
-          <strong>A/C No :</strong> 002163700002424<br>
-          <strong>Branch :</strong> Canada Corner | <strong>IFSC :</strong> YESB0000021
-        </div>
-
-        <p style="margin-top: 15px;">
-          We again express our gratitude for your esteemed organization and looking forward for a long and healthy business relationship. Assuring you of our best service all the times.<br><br>
-          Thanking You,
-        </p>
-
-        <div class="signature-section">
-          THE CERAMIC STUDIO-NASHIK.<br>
-          SALES (8847784888)<br>
-          ACCOUNT (8847785888)
-        </div>
+         ${bottomSection}
       </div>
 
     </body>
