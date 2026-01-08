@@ -16,6 +16,7 @@ const ensureTablesExist = async (conn) => {
             email VARCHAR(255),
             address TEXT,
             attendedBy VARCHAR(255),
+            additionalDiscount VARCHAR(50),
             architect VARCHAR(255),
             headerSection LONGTEXT,
             bottomSection LONGTEXT,
@@ -36,13 +37,14 @@ const ensureTablesExist = async (conn) => {
             productId INT,
             size VARCHAR(50),
             quality VARCHAR(50),
+           
             rate DECIMAL(10,2),
             cov DECIMAL(10,2),
             box INT,
             weight DECIMAL(10,2),
             discount DECIMAL(10,2),
             total DECIMAL(12,2),
-            area DECIMAL(12,2),
+            area VARCHAR(50),
             FOREIGN KEY (quotationId) REFERENCES quotations(id),
             FOREIGN KEY (productId) REFERENCES products(id)
         );
@@ -108,6 +110,7 @@ const ensureTablesExist = async (conn) => {
 exports.saveQuotation = async (req, res) => {
     const {
         clientDetails,
+        additionalDiscount,
         headerSection,
         bottomSection,
         rows,
@@ -124,11 +127,12 @@ exports.saveQuotation = async (req, res) => {
         // We use clientDetails.architect to link the commission later
         const [quotation] = await conn.query(
             `INSERT INTO quotations 
-                (clientName, contactNo, email, address, attendedBy, architect, headerSection, bottomSection, grandTotal, gstNo, paid_amount, due_amount)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                (clientName, contactNo, altContactNo, email, address, attendedBy, architect, headerSection, bottomSection, grandTotal, gstNo, paid_amount, due_amount, additionalDiscount)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 clientDetails.name,
                 clientDetails.contactNo,
+                clientDetails.altContactNo || null,
                 clientDetails.email || null,
                 clientDetails.address,
                 clientDetails.attendedBy || 'System',
@@ -138,7 +142,8 @@ exports.saveQuotation = async (req, res) => {
                 grandTotal,
                 clientDetails.gstNo || '',
                 0.00,        // Initial Paid
-                grandTotal   // Initial Due
+                grandTotal,   // Initial Due
+                additionalDiscount
             ]
         );
 
@@ -192,7 +197,7 @@ exports.saveQuotation = async (req, res) => {
 
 exports.updateQuotation = async (req, res) => {
     const quotationId = req.params.id;
-    const { clientDetails, headerSection, bottomSection, rows, grandTotal } = req.body;
+    const { clientDetails, additionalDiscount, headerSection, bottomSection, rows, grandTotal } = req.body;
 
     const conn = await db.getConnection();
     await conn.beginTransaction();
@@ -210,13 +215,13 @@ exports.updateQuotation = async (req, res) => {
         // 2️⃣ Update Master
         await conn.query(
             `UPDATE quotations SET 
-                clientName=?, contactNo=?, email=?, address=?, attendedBy=?, architect=?, 
-                headerSection=?, bottomSection=?, grandTotal=?, gstNo=?, due_amount = (? - paid_amount)
+                clientName=?, contactNo=?, altContactNo=?, email=?, address=?, attendedBy=?, architect=?,
+                headerSection=?, bottomSection=?, grandTotal=?, gstNo=?, additionalDiscount=?, due_amount = (? - paid_amount)
              WHERE id = ?`,
             [
-                clientDetails.name, clientDetails.contactNo, clientDetails.email, clientDetails.address,
+                clientDetails.name, clientDetails.contactNo, clientDetails.altContactNo, clientDetails.email, clientDetails.address,
                 clientDetails.attendedBy, clientDetails.architect, headerSection, bottomSection,
-                grandTotal, clientDetails.gstNo, grandTotal, quotationId
+                grandTotal, clientDetails.gstNo, additionalDiscount, grandTotal, quotationId
             ]
         );
 
@@ -224,11 +229,13 @@ exports.updateQuotation = async (req, res) => {
         await conn.query(`DELETE FROM quotation_items WHERE quotationId = ?`, [quotationId]);
 
         for (let r of rows) {
-            const itemArea = parseFloat(r.Area) || 0;
+            // const itemArea = parseFloat(r.Area) || 0;
             await conn.query(
                 `INSERT INTO quotation_items (quotationId, productId, size, quality, rate, cov, box, weight, discount, total, area)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [quotationId, r.productId, r.size, r.quality, r.rate, r.cov, r.box, r.Weight, r.discount, r.total, itemArea]
+                [quotationId, r.productId, r.size, r.quality, r.rate, r.cov, r.box, r.Weight, r.discount, r.total,
+                    r.Area
+                ]
             );
 
             await conn.query(`UPDATE products SET availQty = GREATEST(availQty - ?, 0) WHERE id = ?`, [r.box, r.productId]);
@@ -656,6 +663,198 @@ exports.getArchitectLedger = async (req, res) => {
 //         res.status(500).json({ error: err.message });
 //     }
 // };
+// exports.printQuotation = async (req, res) => {
+//     const { id } = req.params;
+//     const { mode } = req.query;
+
+//     try {
+//         const [[quotation]] = await db.query(`SELECT * FROM quotations WHERE id = ?`, [id]);
+//         if (!quotation) return res.status(404).json({ error: "Quotation not found" });
+
+//         const [items] = await db.query(
+//             `SELECT qi.*, p.name AS productName, p.image AS productImage
+//              FROM quotation_items qi
+//              JOIN products p ON p.id = qi.productId
+//              WHERE quotationId = ?`, [id]
+//         );
+
+//         const codeHeaderLabel = mode === "qname" ? "Product Name" : "Code";
+
+//         const itemRows = items.map((it, i) => {
+//             const discountPercent = parseFloat(it.discount || 0);
+//             const rate = parseFloat(it.rate || 0);
+//             const discountAmt = (rate * discountPercent) / 100;
+//             return `
+//                 <tr>
+//                   <td>${i + 1}</td>
+//                   <td>${mode === "qname" ? it.productName : it.productId}</td>
+//                   <td>${it.size}</td>
+//                   <td class="img-cell"><img src="https://dashboard.theceramicstudio.in/uploads/${it.productImage}" /></td>
+//                   <td>${it.quality}</td>
+//                   <td>${rate.toFixed(2)}</td>
+//                   <td>${it.discount}</td>
+//                   <td>${discountAmt.toFixed(2)}</td>
+//                   <td>${it.box}</td>
+//                   <td>${it.area}</td>
+//                   <td>${parseFloat(it.total).toFixed(2)}</td>
+//                 </tr>`;
+//         }).join("");
+
+//         const html = `
+//     <html>
+//     <head>
+//       <style>
+//         @page { size: A4; margin: 10mm; }
+//         body { 
+//             font-family: 'Arial', sans-serif; 
+//             margin: 0; 
+//             padding: 0 30px; 
+//             color: #000; 
+//             font-size: 13px; /* Increased base font size */
+//             line-height: 1.5; 
+//         }
+
+//         .header-section { text-align: center; margin-bottom: 15px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+//         .logo { width: 100px; height: auto; margin-bottom: 5px; }
+//         .address { font-size: 11px; font-weight: bold; line-height: 1.3; }
+
+//         .title-box { text-align: center; margin: 15px 0; }
+//         .title-text { font-size: 20px; font-weight: bold; text-decoration: underline; text-transform: uppercase; }
+
+//         .meta-container { width: 100%; border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; padding: 10px 0; margin-bottom: 15px; }
+//         .meta-table { width: 100%; border-collapse: collapse; }
+//         .meta-table td { padding: 3px 0; font-size: 13px; }
+//         .bold { font-weight: bold; }
+
+//         .main-table { width: 100%; border-collapse: collapse; table-layout: fixed; margin: 10px 0; }
+//         .main-table th, .main-table td { 
+//             border: 1px solid #000; 
+//             padding: 6px 2px; 
+//             font-size: 11.5px; /* Increased table font size */
+//             text-align: center; 
+//             word-wrap: break-word; 
+//         }
+//         .main-table th { background: #f2f2f2; font-weight: bold; }
+
+//         /* Column widths to keep table from being too broad */
+//         .w-sr { width: 35px; } 
+//         .w-img { width: 65px; } 
+//         .w-dis { width: 35px; } 
+//         .w-box { width: 45px; }
+//         .img-cell img { width: 55px; height: 55px; object-fit: contain; display: block; margin: 0 auto; }
+
+//         .summary-row td { text-align: right; font-weight: bold; padding: 8px 10px; font-size: 12px; }
+
+//         .terms-box { margin-top: 25px; font-size: 12px; line-height: 1.6; }
+//         .footer-sign { margin-top: 50px; width: 100%; }
+//         .sign-area { float: right; text-align: center; width: 250px; font-size: 13px; font-weight: bold; }
+//       </style>
+//     </head>
+//     <body>
+
+//       <div class="header-section">
+//         <img src="https://dashboard.theceramicstudio.in/assets/tcslog.png" class="logo" />
+//         <div class="address">
+//           Shop no. 18, Business Bay, Shree Hari Kute Marg, Tidke Colony, Mumbai Naka, Nashik - 422002<br>
+//           Contact: 8847788888, 7058859999, Email: support@theceramicstudio.in
+//         </div>
+//       </div>
+
+//       <div class="title-box">
+//         <span class="title-text">Quotation</span>
+//       </div>
+
+//       <div class="meta-container">
+//         <table class="meta-table">
+//           <tr>
+//             <td style="width: 12%;" class="bold">To,</td>
+//             <td style="width: 48%;" class="bold">${quotation.clientName} (${quotation.contactNo})</td>
+//             <td style="width: 12%;" class="bold">Date :</td>
+//             <td style="width: 28%;">${new Date(quotation.createdAt).toLocaleDateString('en-GB')}</td>
+//           </tr>
+//           <tr>
+//             <td class="bold">Attended By :</td>
+//             <td>${quotation.attendedBy || ''}</td>
+//             <td class="bold">Architect :</td>
+//             <td>${quotation.architect || ''}</td>
+//           </tr>
+//         </table>
+//       </div>
+
+//       <div style="font-size: 12px; margin: 10px 0;">
+//         This is with reference to our discussion with you regarding your requirement; here we quote our best price for your prestigious project as below:
+//       </div>
+
+//       <table class="main-table">
+//         <thead>
+//           <tr>
+//             <th class="w-sr">Sr No</th>
+//             <th style="width: 70px;">${codeHeaderLabel}</th>
+//             <th style="width: 80px;">Size</th>
+//             <th class="w-img">Image</th>
+//             <th>Quality</th>
+//             <th style="width: 55px;">Rate</th>
+//             <th class="w-dis">Dis</th>
+//             <th style="width: 60px;">DisAmt</th>
+//             <th class="w-box">Box</th>
+//             <th style="width: 65px;">App. Area</th>
+//             <th style="width: 85px;">Amount</th>
+//           </tr>
+//         </thead>
+//         <tbody>
+//           ${itemRows}
+//           <tr class="summary-row">
+//             <td colspan="10">Grand Total</td>
+//             <td>${parseFloat(quotation.grandTotal).toFixed(2)}/-</td>
+//           </tr>
+//           <tr class="summary-row">
+//             <td colspan="10">Paidup Amount</td>
+//             <td>0/-</td>
+//           </tr>
+//           <tr class="summary-row">
+//             <td colspan="10">Freight Charges</td>
+//             <td>/</td>
+//           </tr>
+//           <tr class="summary-row">
+//             <td colspan="10">DueAmount</td>
+//             <td>${parseFloat(quotation.grandTotal).toFixed(2)}/-</td>
+//           </tr>
+//         </tbody>
+//       </table>
+
+//       <div class="terms-box">
+//         ${quotation.bottomSection}
+//       </div>
+
+//       <div class="footer-sign">
+//         <div class="sign-area">
+//           For THE CERAMIC STUDIO-NASHIK.<br><br><br><br><br>
+//           Authorized Signature
+//         </div>
+//         <div style="clear:both;"></div>
+//       </div>
+
+//     </body>
+//     </html>`;
+
+//         const browser = await puppeteer.launch({ headless: "new", args: ["--no-sandbox"] });
+//         const page = await browser.newPage();
+//         await page.setContent(html, { waitUntil: "networkidle0" });
+
+//         const pdf = await page.pdf({
+//             format: "A4",
+//             printBackground: true,
+//             margin: { top: "10mm", bottom: "10mm", left: "10mm", right: "10mm" }
+//         });
+
+//         await browser.close();
+//         res.set({ "Content-Type": "application/pdf", "Content-Length": pdf.length, "Content-Disposition": "inline" });
+//         res.send(pdf);
+//     } catch (err) {
+//         res.status(500).json({ error: err.message });
+//     }
+// };
+
 exports.printQuotation = async (req, res) => {
     const { id } = req.params;
     const { mode } = req.query;
@@ -673,23 +872,30 @@ exports.printQuotation = async (req, res) => {
 
         const codeHeaderLabel = mode === "qname" ? "Product Name" : "Code";
 
+        let runningGrandTotal = 0;
         const itemRows = items.map((it, i) => {
             const discountPercent = parseFloat(it.discount || 0);
             const rate = parseFloat(it.rate || 0);
-            const discountAmt = (rate * discountPercent) / 100;
+            // Calculation: Rate minus the percentage discount
+            const unitDiscountedPrice = rate - (rate * discountPercent / 100);
+            const total = parseFloat(it.total || 0);
+            runningGrandTotal += total;
+
             return `
                 <tr>
-                  <td>${i + 1}</td>
-                  <td>${mode === "qname" ? it.productName : it.productId}</td>
-                  <td>${it.size}</td>
-                  <td class="img-cell"><img src="https://dashboard.theceramicstudio.in/uploads/${it.productImage}" /></td>
-                  <td>${it.quality}</td>
-                  <td>${rate.toFixed(2)}</td>
-                  <td>${it.discount}</td>
-                  <td>${discountAmt.toFixed(2)}</td>
-                  <td>${it.box}</td>
-                  <td>${it.area}</td>
-                  <td>${parseFloat(it.total).toFixed(2)}</td>
+                  <td style="border:1px solid black;">${i + 1}</td>
+                  <td style="border:1px solid black;">${mode === "qname" ? it.productName : it.productId}</td>
+                  <td style="border:1px solid black;">${it.size || ''}</td>
+                  <td style="border:1px solid black;" class="img-cell">
+                    <img src="https://dashboard.theceramicstudio.in/uploads/${it.productImage}" />
+                  </td>
+                  <td style="border:1px solid black;">${it.quality || ''}</td>
+                  <td style="border:1px solid black;">${rate.toFixed(2)}</td>
+                  <td style="border:1px solid black;">${discountPercent > 0 ? discountPercent : '-'}</td>
+                  <td style="border:1px solid black;">${unitDiscountedPrice.toFixed(2)}</td>
+                  <td style="border:1px solid black;">${it.box || ''}</td>
+                  <td style="border:1px solid black;">${it.area || ''}</td>
+                  <td style="border:1px solid black;">${total.toFixed(2)}</td>
                 </tr>`;
         }).join("");
 
@@ -698,133 +904,130 @@ exports.printQuotation = async (req, res) => {
     <head>
       <style>
         @page { size: A4; margin: 10mm; }
-        body { 
-            font-family: 'Arial', sans-serif; 
-            margin: 0; 
-            padding: 0 30px; 
-            color: #000; 
-            font-size: 13px; /* Increased base font size */
-            line-height: 1.5; 
-        }
+        body { font-family: 'Arial', sans-serif; margin: 0; padding: 0 20px; color: #000; font-size: 12px; }
+        .text-center { text-align: center; }
+        .header-section { text-align: center; margin-bottom: 10px; }
+        .logo { width: 180px; height: auto; }
+        .company-address { font-weight: bold; margin-top: 10px; line-height: 1.4; }
         
-        .header-section { text-align: center; margin-bottom: 15px; border-bottom: 2px solid #000; padding-bottom: 10px; }
-        .logo { width: 100px; height: auto; margin-bottom: 5px; }
-        .address { font-size: 11px; font-weight: bold; line-height: 1.3; }
+        .title-text { font-size: 18px; font-weight: bold; text-decoration: underline; font-style: italic; margin: 15px 0; display: block; }
 
-        .title-box { text-align: center; margin: 15px 0; }
-        .title-text { font-size: 20px; font-weight: bold; text-decoration: underline; text-transform: uppercase; }
-
-        .meta-container { width: 100%; border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; padding: 10px 0; margin-bottom: 15px; }
-        .meta-table { width: 100%; border-collapse: collapse; }
-        .meta-table td { padding: 3px 0; font-size: 13px; }
-        .bold { font-weight: bold; }
-
-        .main-table { width: 100%; border-collapse: collapse; table-layout: fixed; margin: 10px 0; }
-        .main-table th, .main-table td { 
-            border: 1px solid #000; 
-            padding: 6px 2px; 
-            font-size: 11.5px; /* Increased table font size */
-            text-align: center; 
-            word-wrap: break-word; 
-        }
-        .main-table th { background: #f2f2f2; font-weight: bold; }
+        .meta-table { width: 100%; margin-bottom: 15px; border-collapse: collapse; }
+        .meta-table td { padding: 4px; vertical-align: top; }
         
-        /* Column widths to keep table from being too broad */
-        .w-sr { width: 35px; } 
-        .w-img { width: 65px; } 
-        .w-dis { width: 35px; } 
-        .w-box { width: 45px; }
-        .img-cell img { width: 55px; height: 55px; object-fit: contain; display: block; margin: 0 auto; }
-
-        .summary-row td { text-align: right; font-weight: bold; padding: 8px 10px; font-size: 12px; }
-
-        .terms-box { margin-top: 25px; font-size: 12px; line-height: 1.6; }
-        .footer-sign { margin-top: 50px; width: 100%; }
-        .sign-area { float: right; text-align: center; width: 250px; font-size: 13px; font-weight: bold; }
+        .main-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .main-table th, .main-table td { border: 1px solid black; padding: 5px 2px; text-align: center; font-size: 11px; }
+        .main-table th { background: #f9f9f9; }
+        
+        .img-cell img { width: 60px; height: 60px; object-fit: contain; }
+        .summary-label { text-align: center; font-weight: bold; }
+        
+        .terms-section { margin-top: 20px; line-height: 1.5; }
+        .bank-details { margin-top: 15px; font-size: 12px; }
+        .signature-section { margin-top: 30px; font-weight: bold; }
       </style>
     </head>
     <body>
 
       <div class="header-section">
         <img src="https://dashboard.theceramicstudio.in/assets/tcslog.png" class="logo" />
-        <div class="address">
-          Shop no. 18, Business Bay, Shree Hari Kute Marg, Tidke Colony, Mumbai Naka, Nashik - 422002<br>
-          Contact: 8847788888, 7058859999, Email: support@theceramicstudio.in
+        <div class="company-address">
+          Shop no. 18, Business Bay, Shree Hari Kute Marg,<br>
+          Tidke Colony, Mumbai Naka, Nashik - 422002<br>
+          Contact: 8847788888, 7058859999 | Email: support@theceramicstudio.in
         </div>
+        <hr style="width: 80%; border: 1px solid #000; margin: 15px auto;">
       </div>
 
-      <div class="title-box">
+      <div class="text-center">
         <span class="title-text">Quotation</span>
       </div>
 
-      <div class="meta-container">
-        <table class="meta-table">
-          <tr>
-            <td style="width: 12%;" class="bold">To,</td>
-            <td style="width: 48%;" class="bold">${quotation.clientName} (${quotation.contactNo})</td>
-            <td style="width: 12%;" class="bold">Date :</td>
-            <td style="width: 28%;">${new Date(quotation.createdAt).toLocaleDateString('en-GB')}</td>
-          </tr>
-          <tr>
-            <td class="bold">Attended By :</td>
-            <td>${quotation.attendedBy || ''}</td>
-            <td class="bold">Architect :</td>
-            <td>${quotation.architect || ''}</td>
-          </tr>
-        </table>
-      </div>
+      <table class="meta-table">
+        <tr>
+          <td style="width: 60%;">
+            <strong>To,</strong><br>
+            &nbsp;&nbsp;&nbsp;&nbsp;${quotation.clientName} (${quotation.contactNo})<br>
+            <strong>Attended By:</strong> ${quotation.attendedBy || ''} (${quotation.attendee_contact || ''})
+          </td>
+          <td style="width: 40%; text-align: right;">
+            <strong>Date:</strong> ${new Date(quotation.createdAt).toLocaleDateString('en-GB')}
+          </td>
+        </tr>
+      </table>
 
-      <div style="font-size: 12px; margin: 10px 0;">
-        This is with reference to our discussion with you regarding your requirement; here we quote our best price for your prestigious project as below:
-      </div>
+      <p>This is with reference to our discussion with you regarding your requirement; here we quote our best price for your prestigious project as below:</p>
 
       <table class="main-table">
         <thead>
           <tr>
-            <th class="w-sr">Sr No</th>
-            <th style="width: 70px;">${codeHeaderLabel}</th>
-            <th style="width: 80px;">Size</th>
-            <th class="w-img">Image</th>
-            <th>Quality</th>
-            <th style="width: 55px;">Rate</th>
-            <th class="w-dis">Dis</th>
-            <th style="width: 60px;">DisAmt</th>
-            <th class="w-box">Box</th>
-            <th style="width: 65px;">App. Area</th>
-            <th style="width: 85px;">Amount</th>
+            <th width="3%">Sr No</th>
+            <th width="12%">${codeHeaderLabel}</th>
+            <th width="10%">Size</th>
+            <th width="10%">Image</th>
+            <th width="10%">Quality</th>
+            <th width="8%">Rate</th>
+            <th width="5%">Dis</th>
+            <th width="8%">DisAmt</th>
+            <th width="8%">Box</th>
+            <th width="10%">App. Area</th>
+            <th width="12%">Amount</th>
           </tr>
         </thead>
         <tbody>
           ${itemRows}
-          <tr class="summary-row">
-            <td colspan="10">Grand Total</td>
-            <td>${parseFloat(quotation.grandTotal).toFixed(2)}/-</td>
+          <tr>
+            <td colspan="10" class="summary-label">Grand Total</td>
+            <td>${runningGrandTotal.toFixed(2)}/-</td>
           </tr>
-          <tr class="summary-row">
-            <td colspan="10">Paidup Amount</td>
-            <td>0/-</td>
+          ${quotation.discount && quotation.discount > 0 ? `
+          <tr>
+            <td colspan="10" class="summary-label">Discount (${quotation.discount}%)</td>
+            <td>${quotation.discountedAmt}/-</td>
+          </tr>` : ''}
+          <tr>
+            <td colspan="10" class="summary-label">Paidup Amount</td>
+            <td>${(quotation.total_paid || 0).toFixed(2)}/-</td>
           </tr>
-          <tr class="summary-row">
-            <td colspan="10">Freight Charges</td>
-            <td>/</td>
+          <tr>
+            <td colspan="10" class="summary-label">Freight Charges</td>
+            <td>${(quotation.freight_charges || 0).toFixed(2)}/-</td>
           </tr>
-          <tr class="summary-row">
-            <td colspan="10">DueAmount</td>
-            <td>${parseFloat(quotation.grandTotal).toFixed(2)}/-</td>
+          <tr>
+            <td colspan="10" class="summary-label">Due Amount</td>
+            <td style="background: #eee; font-weight: bold;">${Number(quotation.due_amount || 0).toFixed(2)}/-</td>
           </tr>
         </tbody>
       </table>
 
-      <div class="terms-box">
-        ${quotation.bottomSection}
-      </div>
-
-      <div class="footer-sign">
-        <div class="sign-area">
-          For THE CERAMIC STUDIO-NASHIK.<br><br><br><br><br>
-          Authorized Signature
+      <div class="terms-section">
+        <p>Above rates are including GST @ 18%, Excluding unloading charge and this are Nashik warehouse rates.</p>
+        <p>Please be aware that during transport, there is a possibility of up to 3% breakage, for which we kindly ask for your understanding and responsibility.</p>
+        
+        <div style="margin-top: 10px;">
+            <strong>Payment Terms :</strong> 100% Advance<br>
+            <strong>Delivery Period :</strong> 7 TO 8 Days from the date of order / dispatch schedule.<br>
+            <strong>Billing :</strong> GST Billing @ 18%<br>
+            <strong>Validity Of Price :</strong> 30 Days from Date of Quotation
         </div>
-        <div style="clear:both;"></div>
+
+        <div class="bank-details">
+          <strong>BANK DETAILS :</strong><br>
+          <strong>Yes Bank :</strong> THE CERAMIC STUDIO<br>
+          <strong>A/C No :</strong> 002163700002424<br>
+          <strong>Branch :</strong> Canada Corner | <strong>IFSC :</strong> YESB0000021
+        </div>
+
+        <p style="margin-top: 15px;">
+          We again express our gratitude for your esteemed organization and looking forward for a long and healthy business relationship. Assuring you of our best service all the times.<br><br>
+          Thanking You,
+        </p>
+
+        <div class="signature-section">
+          THE CERAMIC STUDIO-NASHIK.<br>
+          SALES (8847784888)<br>
+          ACCOUNT (8847785888)
+        </div>
       </div>
 
     </body>
@@ -847,8 +1050,6 @@ exports.printQuotation = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
-
-
 exports.generateDeliveryChallan = async (req, res) => {
     const { quotationId, client, contact, address, driverDetails, items } = req.body;
     const conn = await db.getConnection();
@@ -1408,9 +1609,9 @@ exports.deleteDeliveryChallan = async (req, res) => {
     const { challanId } = req.params;
 
     if (!challanId) {
-        return res.status(400).json({ 
-            success: false, 
-            message: "challanId is required" 
+        return res.status(400).json({
+            success: false,
+            message: "challanId is required"
         });
     }
 
@@ -1426,9 +1627,9 @@ exports.deleteDeliveryChallan = async (req, res) => {
 
         if (!challan) {
             conn.release();
-            return res.status(404).json({ 
-                success: false, 
-                message: "Delivery Challan not found" 
+            return res.status(404).json({
+                success: false,
+                message: "Delivery Challan not found"
             });
         }
 
@@ -1473,17 +1674,17 @@ exports.deleteDeliveryChallan = async (req, res) => {
         );
 
         await conn.commit();
-        res.json({ 
-            success: true, 
-            message: "Delivery Challan deleted successfully and stock restored!" 
+        res.json({
+            success: true,
+            message: "Delivery Challan deleted successfully and stock restored!"
         });
 
     } catch (err) {
         await conn.rollback();
         console.error("Delete DC Error:", err);
-        res.status(500).json({ 
-            success: false, 
-            error: err.message 
+        res.status(500).json({
+            success: false,
+            error: err.message
         });
     } finally {
         conn.release();

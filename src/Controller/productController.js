@@ -174,7 +174,6 @@ exports.updateProduct = async (req, res) => {
 
     try {
         const { id } = req.params;
-
         const {
             name,
             size,
@@ -185,32 +184,33 @@ exports.updateProduct = async (req, res) => {
             status,
             link,
             godown,
-            Cov,
+            cov, // Note: standardizing to lowercase 'cov' to match your input
             description,
             batches
         } = req.body;
-
+        console.log(req.body)
         const image = req.file ? req.file.filename : null;
 
-        const parsedGodown = JSON.parse(godown);
-        const parsedBatches = JSON.parse(batches);
+        // Parse JSON strings from form-data
+        const parsedGodown = Array.isArray(godown) ? godown : JSON.parse(godown || "[]");
+        const parsedBatches = Array.isArray(batches) ? batches : JSON.parse(batches || "[]");
         const godownValue = parsedGodown.join(",");
 
-        // 1️⃣ UPDATE PRODUCT
+        // 1️⃣ UPDATE PRODUCT (Including COV)
         let updateProductSQL = `
-      UPDATE products SET
-        name = ?,
-        size = ?,
-        brand = ?,
-        category = ?,
-        quality = ?,
-        rate = ?,
-        status = ?,
-        Cov = ?,
-        link = ?,
-        godown = ?,
-        description = ?
-    `;
+            UPDATE products SET
+                name = ?,
+                size = ?,
+                brand = ?,
+                category = ?,
+                quality = ?,
+                rate = ?,
+                status = ?,
+                cov = ?, 
+                link = ?,
+                godown = ?,
+                description = ?
+        `;
 
         const params = [
             name,
@@ -220,7 +220,7 @@ exports.updateProduct = async (req, res) => {
             quality,
             rate,
             status,
-            Cov,
+            cov, // Mapping the 'cov' value here
             link,
             godownValue,
             description
@@ -236,50 +236,29 @@ exports.updateProduct = async (req, res) => {
 
         await conn.query(updateProductSQL, params);
 
-        // 2️⃣ GET EXISTING BATCHES
-        const [existingBatches] = await conn.query(
-            `SELECT batch_no FROM product_batches WHERE product_id = ?`,
-            [id]
-        );
+        // 2️⃣ BATCH REPLACEMENT LOGIC
+        // First, delete ALL existing batches for this product
+        await conn.query(`DELETE FROM product_batches WHERE product_id = ?`, [id]);
 
-        const existingBatchNos = existingBatches.map(b => b.batch_no);
-        const incomingBatchNos = parsedBatches.map(b => b.batchNo);
+        // Then, insert the new batches (Direct Replace)
+        if (parsedBatches.length > 0) {
+            const batchValues = parsedBatches.map(batch => [
+                id,
+                batch.batchNo,
+                Number(batch.qty),
+                batch.location
+            ]);
 
-        // 3️⃣ DELETE REMOVED BATCHES
-        const batchesToDelete = existingBatchNos.filter(
-            b => !incomingBatchNos.includes(b)
-        );
-
-        if (batchesToDelete.length > 0) {
             await conn.query(
-                `DELETE FROM product_batches 
-         WHERE product_id = ? AND batch_no IN (?)`,
-                [id, batchesToDelete]
-            );
-        }
-
-        // 4️⃣ UPSERT BATCHES
-        for (const batch of parsedBatches) {
-            await conn.query(
-                `INSERT INTO product_batches (product_id, batch_no, qty, location)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-           qty = VALUES(qty),
-           location = VALUES(location)`,
-                [
-                    id,
-                    batch.batchNo,
-                    Number(batch.qty),
-                    batch.location
-                ]
+                `INSERT INTO product_batches (product_id, batch_no, qty, location) VALUES ?`,
+                [batchValues]
             );
         }
 
         await conn.commit();
-
         res.json({
             success: true,
-            message: "Product updated successfully"
+            message: "Product and batches updated (replaced) successfully"
         });
 
     } catch (error) {
