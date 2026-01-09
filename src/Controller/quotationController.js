@@ -1034,6 +1034,7 @@ exports.printQuotation = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
 exports.generateDeliveryChallan = async (req, res) => {
     const { quotationId, client, contact, address, driverDetails, items } = req.body;
     const conn = await db.getConnection();
@@ -1050,45 +1051,97 @@ exports.generateDeliveryChallan = async (req, res) => {
         const challanId = challan.insertId;
 
         // 3️⃣ Process Products
+        // for (let p of items) {
+        //     // ⭐ AUTOMATIC QTY CALCULATION
+        //     // We fetch the 'cov' from quotation_items to convert Boxes -> Qty
+        //     const [[itemData]] = await conn.query(
+        //         `SELECT cov FROM quotation_items WHERE quotationId = ? AND productId = ?`,
+        //         [quotationId, p.productId]
+        //     );
+
+        //     const dispatchQty = p.dispatchBoxes * (itemData.cov || 0);
+
+        //     // Insert into Challan Items
+        //     await conn.query(
+        //         `INSERT INTO delivery_challan_items (challanId, productId, productName, dispatchBoxes, dispatchQty, remainingStock) VALUES (?, ?, ?, ?, ?, ?)`,
+        //         [challanId, p.productId, p.productName, p.dispatchBoxes, dispatchQty, p.remainingStock]
+        //     );
+
+        //     // 🔥 FIFO Stock Deduction from Batches (Qty based)
+        //     let remainingToDeduct = dispatchQty;
+        //     const [batches] = await conn.query(
+        //         `SELECT id, qty FROM product_batches WHERE product_id = ? AND qty > 0 ORDER BY batch_no ASC`,
+        //         [p.productId]
+        //     );
+
+        //     for (let b of batches) {
+        //         if (remainingToDeduct <= 0) break;
+        //         let deduct = Math.min(b.qty, remainingToDeduct);
+        //         await conn.query(`UPDATE product_batches SET qty = qty - ? WHERE id = ?`, [deduct, b.id]);
+        //         remainingToDeduct -= deduct;
+        //     }
+
+        //     // ⚡ Update Product Master Total (Box based deduction for availQty)
+        //     await conn.query(
+        //         `UPDATE products SET availQty = availQty - ? WHERE id = ?`,
+        //         [p.dispatchBoxes, p.productId]
+        //     );
+
+        //     // ⚡ Update Quotation Progress (Qty based)
+        //     await conn.query(
+        //         `UPDATE quotation_items SET weight = weight + ? WHERE quotationId = ? AND productId = ?`,
+        //         [dispatchQty, quotationId, p.productId]
+        //     );
+        // }
+
         for (let p of items) {
-            // ⭐ AUTOMATIC QTY CALCULATION
-            // We fetch the 'cov' from quotation_items to convert Boxes -> Qty
+
+            if (!p.dispatchBoxes || p.dispatchBoxes <= 0) continue;
+
             const [[itemData]] = await conn.query(
                 `SELECT cov FROM quotation_items WHERE quotationId = ? AND productId = ?`,
                 [quotationId, p.productId]
             );
 
-            const dispatchQty = p.dispatchBoxes * (itemData.cov || 0);
+            const dispatchQty = p.dispatchBoxes * itemData.cov;
 
-            // Insert into Challan Items
             await conn.query(
-                `INSERT INTO delivery_challan_items (challanId, productId, productName, dispatchBoxes, dispatchQty, remainingStock) VALUES (?, ?, ?, ?, ?, ?)`,
+                `INSERT INTO delivery_challan_items 
+        (challanId, productId, productName, dispatchBoxes, dispatchQty, remainingStock) 
+        VALUES (?, ?, ?, ?, ?, ?)`,
                 [challanId, p.productId, p.productName, p.dispatchBoxes, dispatchQty, p.remainingStock]
             );
 
-            // 🔥 FIFO Stock Deduction from Batches (Qty based)
+            // FIFO batch deduction
             let remainingToDeduct = dispatchQty;
             const [batches] = await conn.query(
-                `SELECT id, qty FROM product_batches WHERE product_id = ? AND qty > 0 ORDER BY batch_no ASC`,
+                `SELECT id, qty FROM product_batches 
+         WHERE product_id = ? AND qty > 0 
+         ORDER BY batch_no ASC`,
                 [p.productId]
             );
 
             for (let b of batches) {
                 if (remainingToDeduct <= 0) break;
-                let deduct = Math.min(b.qty, remainingToDeduct);
-                await conn.query(`UPDATE product_batches SET qty = qty - ? WHERE id = ?`, [deduct, b.id]);
+                const deduct = Math.min(b.qty, remainingToDeduct);
+                await conn.query(
+                    `UPDATE product_batches SET qty = qty - ? WHERE id = ?`,
+                    [deduct, b.id]
+                );
                 remainingToDeduct -= deduct;
             }
 
-            // ⚡ Update Product Master Total (Box based deduction for availQty)
+            // Box based deduction
             await conn.query(
                 `UPDATE products SET availQty = availQty - ? WHERE id = ?`,
                 [p.dispatchBoxes, p.productId]
             );
 
-            // ⚡ Update Quotation Progress (Qty based)
+            // Quotation progress
             await conn.query(
-                `UPDATE quotation_items SET weight = weight + ? WHERE quotationId = ? AND productId = ?`,
+                `UPDATE quotation_items 
+         SET weight = weight + ? 
+         WHERE quotationId = ? AND productId = ?`,
                 [dispatchQty, quotationId, p.productId]
             );
         }

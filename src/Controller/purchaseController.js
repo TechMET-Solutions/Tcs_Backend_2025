@@ -46,6 +46,7 @@ const ensurePurchaseTablesExist = async (conn) => {
         );
     `);
 };
+
 // ✅ ADD PURCHASE (FINAL PERFECT CODE)
 // exports.addPurchase = async (req, res) => {
 //     const { purchaseDate, billNo, clientName, clientContact, items, subTotal } = req.body;
@@ -235,6 +236,135 @@ exports.addPurchase = async (req, res) => {
     } catch (error) {
         await conn.rollback();
         console.error("❌ Purchase Error:", error);
+        res.status(500).json({ success: false, error: "Server Error" });
+    } finally {
+        conn.release();
+    }
+};
+
+
+// Update Purchares
+
+exports.updatePurchase = async (req, res) => {
+    const { purchaseId } = req.params;
+    const { purchaseDate, billNo, clientName, clientContact, items, subTotal } = req.body;
+
+    const conn = await db.getConnection();
+    await conn.beginTransaction();
+
+    try {
+        // 1️⃣ UPDATE PURCHASE MASTER
+        await conn.query(
+            `UPDATE purchases 
+             SET bill_no = ?, purchase_date = ?, client_name = ?, client_contact = ?, subtotal = ?
+             WHERE id = ?`,
+            [billNo, purchaseDate, clientName, clientContact, subTotal, purchaseId]
+        );
+
+        // 2️⃣ GET OLD PURCHASE ITEMS
+        const [oldItems] = await conn.query(
+            `SELECT product_id, batch_no, qty 
+             FROM purchase_items 
+             WHERE purchase_id = ?`,
+            [purchaseId]
+        );
+
+        // 3️⃣ REVERSE OLD STOCK
+        for (const old of oldItems) {
+            await conn.query(
+                `UPDATE product_batches 
+                 SET qty = qty - ?
+                 WHERE product_id = ? AND batch_no = ?`,
+                [old.qty, old.product_id, old.batch_no]
+            );
+        }
+
+        // 4️⃣ DELETE OLD PURCHASE ITEMS
+        await conn.query(
+            `DELETE FROM purchase_items WHERE purchase_id = ?`,
+            [purchaseId]
+        );
+
+        // 5️⃣ INSERT UPDATED ITEMS + ADD STOCK
+        for (const item of items) {
+            if (!item.qty || !item.batchNo) continue;
+
+            let productId = item.productId;
+
+            // 🔹 CREATE PRODUCT IF NOT EXISTS
+            if (!productId) {
+                const [productInsert] = await conn.query(
+                    `INSERT INTO products 
+                     (name, size, quality, rate, status)
+                     VALUES (?, ?, ?, ?, ?)`,
+                    [
+                        item.productName,
+                        item.size || "",
+                        item.quality || "",
+                        item.rate || 0,
+                        "active"
+                    ]
+                );
+                productId = productInsert.insertId;
+            }
+
+            // ➕ INSERT PURCHASE ITEM
+            await conn.query(
+                `INSERT INTO purchase_items
+                 (purchase_id, product_id, batch_no, qty, rate, cov, total, godown)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    purchaseId,
+                    productId,
+                    item.batchNo,
+                    Number(item.qty),
+                    Number(item.rate),
+                    Number(item.cov || 1),
+                    Number(item.total),
+                    item.godown
+                ]
+            );
+
+            // ➕ UPDATE / INSERT BATCH
+            const [batch] = await conn.query(
+                `SELECT id FROM product_batches 
+                 WHERE product_id = ? AND batch_no = ?`,
+                [productId, item.batchNo]
+            );
+
+            if (batch.length > 0) {
+                await conn.query(
+                    `UPDATE product_batches 
+                     SET qty = qty + ?
+                     WHERE product_id = ? AND batch_no = ?`,
+                    [Number(item.qty), productId, item.batchNo]
+                );
+            } else {
+                await conn.query(
+                    `INSERT INTO product_batches
+                     (product_id, batch_no, qty, location)
+                     VALUES (?, ?, ?, ?)`,
+                    [
+                        productId,
+                        item.batchNo,
+                        Number(item.qty),
+                        item.godown
+                    ]
+                );
+            }
+        }
+
+        await conn.commit();
+
+        res.json({
+            success: true,
+            message: "Purchase Updated Successfully",
+            purchaseId
+        });
+
+    } catch (error) {
+        await conn.rollback();
+        console.error("❌ Update Purchase Error:", error);
         res.status(500).json({ success: false, error: "Server Error" });
     } finally {
         conn.release();
