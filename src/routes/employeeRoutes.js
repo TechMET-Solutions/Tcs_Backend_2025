@@ -36,11 +36,11 @@ router.patch('/status/:id', empCtrl.toggleStatus); // ✅ Use PATCH for status
 router.get('/list', empCtrl.getEmployees);
 router.post("/login", empCtrl.employeeLogin);
 router.post('/punch', empCtrl.punchAttendance);
-router.get("/status/:id", empCtrl.getLastStatus);
+router.get("/status/:employeeId", empCtrl.getLastStatus);
 
 // Attendence
 router.post("/punch-in", empCtrl.punchIn);
 router.post("/punch-out", empCtrl.punchOut);
 router.get("/:employeeId", empCtrl.MonthAttendance);
-router.get("/attendance-summary/:employeeId",empCtrl.attendanceSummary);
+router.get("/attendance-summary/:employeeId", empCtrl.attendanceSummary);
 module.exports = router;

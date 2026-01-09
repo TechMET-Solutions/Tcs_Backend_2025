@@ -958,7 +958,7 @@ exports.printQuotation = async (req, res) => {
         </tr>
       </table>
 
-      <p>This is with reference to our discussion with you regarding your requirement; here we quote our best price for your prestigious project as below:</p>
+        ${HeaderSection}
 
       <table class="main-table">
         <thead>

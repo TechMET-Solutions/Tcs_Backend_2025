@@ -403,9 +403,7 @@ exports.employeeLogin = async (req, res) => {
             });
         }
 
-        // =====================
-        // 🔑 ADMIN/SUPERADMIN LOGIN (FROM ROLES TABLE)
-        // =====================
+
         await ensureRolesTable(); // Ensure table and default records exist
 
         const [roleRows] = await db.query(
@@ -549,23 +547,33 @@ exports.punchAttendance = async (req, res) => {
         res.status(500).json({ success: false, error: "Internal Server Error" });
     }
 };
-
 exports.getLastStatus = async (req, res) => {
-    const { employeeId } = req.params;
-    const today = new Date().toISOString().slice(0, 10);
+    try {
+        const { employeeId } = req.params;
 
-    const [rows] = await db.query(
-        "SELECT punch_in, punch_out FROM attendance WHERE employeeId=? AND attendance_date=?",
-        [employeeId, today]
-    );
+        // Use 'en-CA' to force YYYY-MM-DD format in local time
+        const today = new Date().toLocaleDateString('en-CA');
 
-    if (!rows.length) return res.json({ success: true, status: "READY" });
-    if (rows[0].punch_out) return res.json({ success: true, status: "COMPLETED" });
-    if (rows[0].punch_in) return res.json({ success: true, status: "IN" });
+        const [rows] = await db.query(
+            "SELECT punch_in, punch_out FROM attendance WHERE employeeId=? AND attendance_date=?",
+            [employeeId, today]
+        );
 
-    res.json({ success: true, status: "READY" });
+        // If no row exists for TODAY'S date, it's safe to show READY
+        if (rows.length === 0) {
+            return res.json({ success: true, status: "READY" });
+        }
+
+        if (rows[0].punch_out) {
+            return res.json({ success: true, status: "COMPLETED" });
+        }
+
+        return res.json({ success: true, status: "IN" });
+
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
 };
-
 
 // routes/attendance.js
 exports.punchIn = async (req, res) => {

@@ -14,4 +14,7 @@ router.get("/employee/:employeeId", taskController.getEmployeeTasks);
 // Route to update status and add a mandatory remark
 router.put("/update/:taskId", taskController.updateTaskStatus);
 
+router.delete("/:taskId", taskController.deleteTask);
+
+
 module.exports = router;

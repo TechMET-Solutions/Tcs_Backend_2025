@@ -115,3 +115,20 @@ exports.getEmployeeTasks = async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 };
+
+exports.deleteTask = async (req, res) => {
+    try {
+        const { taskId } = req.params;
+
+        const query = "DELETE FROM tasks WHERE id = ?";
+        const [result] = await db.execute(query, [taskId]);
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: "Task not found" });
+        }
+
+        res.json({ success: true, message: "Task deleted successfully" });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
