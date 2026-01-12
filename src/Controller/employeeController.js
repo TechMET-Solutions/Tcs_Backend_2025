@@ -403,31 +403,24 @@ exports.employeeLogin = async (req, res) => {
             });
         }
 
+        await ensureRolesTable();
 
-        await ensureRolesTable(); // Ensure table and default records exist
-
-        const [roleRows] = await db.query(
-            "SELECT * FROM roles WHERE email = ?",
-            [email]
-        );
+        // =====================
+        // 🛡️ ADMIN / SUPERADMIN CHECK
+        // =====================
+        const [roleRows] = await db.query("SELECT * FROM roles WHERE email = ?", [email]);
 
         if (roleRows.length > 0) {
             const roleUser = roleRows[0];
 
-            // Check status
             if (roleUser.status !== "active") {
-                return res.status(403).json({
-                    success: false,
-                    message: "Your account is inactive. Please contact support."
-                });
+                return res.status(403).json({ success: false, message: "Account inactive." });
             }
 
-            // Verify password
             if (roleUser.password !== password) {
-                return res.status(401).json({ success: false, message: "Invalid email or password" });
+                return res.status(401).json({ success: false, message: "Invalid credentials" });
             }
 
-            // Generate token for admin/superadmin
             const token = jwt.sign(
                 { id: roleUser.id, role: roleUser.role, email: roleUser.email },
                 process.env.JWT_SECRET,
@@ -438,18 +431,19 @@ exports.employeeLogin = async (req, res) => {
                 success: true,
                 role: roleUser.role,
                 token,
-                user: { name: roleUser.role.charAt(0).toUpperCase() + roleUser.role.slice(1), email: roleUser.email },
-                permissions: {}
+                user: {
+                    id: roleUser.id, // ID now passed for Admin/Superadmin
+                    name: roleUser.role.toUpperCase(),
+                    email: roleUser.email
+                },
+                permissions: {} // Admins typically have full access
             });
         }
 
         // =====================
         // 👤 EMPLOYEE LOGIN
         // =====================
-        const [rows] = await db.query(
-            "SELECT * FROM employees WHERE email = ?",
-            [email]
-        );
+        const [rows] = await db.query("SELECT * FROM employees WHERE email = ?", [email]);
 
         if (!rows.length) {
             return res.status(401).json({ success: false, message: "Invalid email or password" });
@@ -457,41 +451,23 @@ exports.employeeLogin = async (req, res) => {
 
         const employee = rows[0];
 
-        // 🛡️ STATUS CHECK
-        // If the status is 'inactive', block the login immediately.
         if (employee.status !== "active") {
-            return res.status(403).json({
-                success: false,
-                message: "Your account is inactive. Please contact support."
-            });
+            return res.status(403).json({ success: false, message: "Account inactive." });
         }
 
-        // 🔑 PASSWORD CHECK
-        // ⚠️ Note: In production, use bcrypt.compare(password, employee.password)
         if (employee.password !== password) {
             return res.status(401).json({ success: false, message: "Invalid email or password" });
         }
 
-        // =====================
-        // 🛡️ FETCH PERMISSIONS
-        // =====================
-        const [permissionRows] = await db.query(
+        // Fetch Permissions
+        const [permRows] = await db.query(
             "SELECT permissions FROM employee_permissions WHERE employee_id = ?",
             [employee.id]
         );
+        const permissions = permRows.length > 0 ? permRows[0].permissions : {};
 
-        const permissions = permissionRows.length > 0 ? permissionRows[0].permissions : {};
-
-        // =====================
-        // 🎫 JWT TOKEN
-        // =====================
         const token = jwt.sign(
-            {
-                id: employee.id,
-                role: "employee",
-                email: employee.email,
-                permissions: permissions
-            },
+            { id: employee.id, role: "employee", email: employee.email, permissions },
             process.env.JWT_SECRET,
             { expiresIn: process.env.JWT_EXPIRES_IN }
         );
@@ -505,8 +481,6 @@ exports.employeeLogin = async (req, res) => {
                 name: employee.name,
                 email: employee.email,
                 phone: employee.phone,
-                commission: employee.commission,
-                salary: employee.salary,
                 profile_photo: employee.profile_photo
             },
             permissions: permissions
@@ -514,10 +488,7 @@ exports.employeeLogin = async (req, res) => {
 
     } catch (error) {
         console.error("Login Error:", error);
-        res.status(500).json({
-            success: false,
-            error: error.message,
-        });
+        res.status(500).json({ success: false, error: error.message });
     }
 };
 

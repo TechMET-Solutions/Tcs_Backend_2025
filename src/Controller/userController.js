@@ -3,50 +3,51 @@ const db = require("../../Config/database");
 // ✅ CREATE CUSTOMER (AUTO CREATE TABLE + INSERT) ✅ PROMISE SAFE
 exports.createCustomer = async (req, res) => {
     try {
-        // 1️⃣ Destructure all fields from your frontend payload
         const {
-            name,
-            Last_Name,
-            phone,
-            altphone,
-            email,
-            billingName,
-            assignedEmployee,
-            assignedArchitect,
-            status,
-            notes,
-            projectName,
-            siteName,
-            siteType,
-            priority
+            name, Last_Name, phone, altphone, email, billingName,
+            assignedEmployee, assignedArchitect, status, notes,
+            projectName, siteName, siteType, priority
         } = req.body;
 
-        // 2️⃣ AUTO CREATE/UPDATE TABLE (Ensuring all new columns exist)
+        // 1️⃣ Ensure Table Exists
         const createTableSQL = `
             CREATE TABLE IF NOT EXISTS customers (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                name VARCHAR(100) NOT NULL,
-                Last_Name VARCHAR(100),
-                phone VARCHAR(20) NOT NULL,
-                altphone VARCHAR(20),
-                email VARCHAR(100),
-                billingName VARCHAR(100),
-                assignedEmployee VARCHAR(100),
-                assignedArchitect VARCHAR(100),
-                status VARCHAR(50) DEFAULT 'New',
-                notes TEXT,
-                projectName VARCHAR(255),
-                siteName VARCHAR(255),
-                siteType VARCHAR(100),
-                priority VARCHAR(50) DEFAULT 'Low',
+                name VARCHAR(100) DEFAULT NULL,
+                Last_Name VARCHAR(100) DEFAULT NULL,
+                phone VARCHAR(20) DEFAULT NULL,
+                altphone VARCHAR(20) DEFAULT NULL,
+                email VARCHAR(100) DEFAULT NULL,
+                billingName VARCHAR(100) DEFAULT NULL,
+                assignedEmployee VARCHAR(100) DEFAULT NULL,
+                assignedArchitect VARCHAR(100) DEFAULT NULL,
+                status VARCHAR(50) DEFAULT NULL,
+                notes TEXT DEFAULT NULL,
+                projectName VARCHAR(255) DEFAULT NULL,
+                siteName VARCHAR(255) DEFAULT NULL,
+                siteType VARCHAR(100) DEFAULT NULL,
+                priority VARCHAR(50) DEFAULT NULL,
                 createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             )
         `;
-
         await db.query(createTableSQL);
 
-        // 3️⃣ INSERT DATA (Matching your specific payload)
+        // 2️⃣ CHECK IF CUSTOMER EXISTS (By Phone Number)
+        // We check if the phone number is already in the database
+        if (phone) {
+            const checkSQL = `SELECT id FROM customers WHERE phone = ? LIMIT 1`;
+            const [existing] = await db.query(checkSQL, [phone]);
+
+            if (existing.length > 0) {
+                return res.status(409).json({
+                    success: false,
+                    message: `❌ A customer with phone number ${phone} already exists.`
+                });
+            }
+        }
+
+        // 3️⃣ INSERT DATA (Since no duplicate was found)
         const insertSQL = `
             INSERT INTO customers 
             (name, Last_Name, phone, altphone, email, billingName, assignedEmployee, assignedArchitect, status, notes, projectName, siteName, siteType, priority)
@@ -74,8 +75,7 @@ exports.createCustomer = async (req, res) => {
         res.status(201).json({
             success: true,
             message: "✅ Customer record created successfully",
-            customerId: result.insertId,
-            data: { name, projectName }
+            customerId: result.insertId
         });
 
     } catch (err) {
@@ -89,19 +89,53 @@ exports.createCustomer = async (req, res) => {
 };
 
 // ✅ GET ALL CUSTOMERS WITH PAGINATION
+// exports.getCustomers = async (req, res) => {
+//     try {
+//         const page = parseInt(req.query.page) || 1;
+//         const limit = parseInt(req.query.limit) || 10;
+//         const offset = (page - 1) * limit;
+
+//         // Get total count for pagination UI
+//         const [countResult] = await db.query("SELECT COUNT(*) as total FROM customers");
+//         const total = countResult[0].total;
+
+//         // Get paginated data
+//         const [result] = await db.query(
+//             "SELECT * FROM customers ORDER BY id DESC LIMIT ? OFFSET ?",
+//             [limit, offset]
+//         );
+
+//         res.json({
+//             success: true,
+//             customers: result,
+//             pagination: {
+//                 total,
+//                 page,
+//                 limit,
+//                 totalPages: Math.ceil(total / limit)
+//             }
+//         });
+//     } catch (err) {
+//         res.status(500).json({ success: false, error: err.message });
+//     }
+// };
 exports.getCustomers = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
 
-        // Get total count for pagination UI
+        // 1. Get total count
         const [countResult] = await db.query("SELECT COUNT(*) as total FROM customers");
         const total = countResult[0].total;
 
-        // Get paginated data
+        // 2. Get paginated data with Custom Priority Sorting
+        // FIELD() returns the index of the value in the list provided.
+        // We sort by that index, then by id DESC for items with the same priority.
         const [result] = await db.query(
-            "SELECT * FROM customers ORDER BY id DESC LIMIT ? OFFSET ?",
+            `SELECT * FROM customers 
+             ORDER BY FIELD(priority, 'URGENT', 'HIGH', 'MEDIUM', 'LOW'), id DESC 
+             LIMIT ? OFFSET ?`,
             [limit, offset]
         );
 
@@ -119,7 +153,6 @@ exports.getCustomers = async (req, res) => {
         res.status(500).json({ success: false, error: err.message });
     }
 };
-
 // ✅ ADD FOLLOWUP ✅ PROMISE SAFE
 exports.addFollowup = async (req, res) => {
     try {

@@ -20,6 +20,8 @@ app.use("/api/payment", require("./src/routes/paymentRoutes.js"));
 app.use("/api/roles", require("./src/routes/employeeRoleRoutes.js"));
 app.use("/api/suppliers", require("./src/routes/supplierRoutes.js"));
 app.use("/api/tasks", require("./src/routes/taskRoutes.js"));
+app.use("/api/transactions", require("./src/routes/transactionRoutes.js"));
+app.use("/api/todo", require("./src/routes/todoRoutes.js"));
 app.get("/", (req, res) => {
     res.send("✅ Node.js Server Running...");
 });

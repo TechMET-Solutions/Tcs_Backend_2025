@@ -91,7 +91,7 @@ exports.getAllTasks = async (req, res) => {
         const updatedTasks = rows.map(task => ({
             ...task,
             profile_url: task.profile_photo
-                ? `http://localhost:5000/uploads/employees/${task.profile_photo}`
+                ? `https://dashboard.theceramicstudio.in/uploads/employees/${task.profile_photo}`
                 : null
         }));
 
